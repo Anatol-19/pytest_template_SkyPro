@@ -5,7 +5,6 @@
 import sys
 import shutil
 import subprocess
-import json
 import os
 
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
@@ -146,7 +145,7 @@ if __name__ == "__main__":
     service = SpeedtestService()
     base_url = get_base_url()  # Получаем базовый URL для текущего окружения
     routes = service.config.options('routes')  # Получаем все ключи в секции 'routes'
-    iteration_count = 5  # Количество итераций можно изменить здесь
+    iteration_count = 10  # Количество итераций можно изменить здесь
 
     for route in routes:
         full_url = get_full_url(route)

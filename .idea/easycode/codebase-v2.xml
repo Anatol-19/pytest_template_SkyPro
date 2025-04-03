@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="com.obiscr.chatgpt.settings.EasyCodeState">
+    <option name="projectFiles" value="$PROJECT_DIR$/lighthouse/lighthouse/__init__.py;C:/Auto Tests/PyTest Template/lighthouse/__init__.py;C:/Auto Tests/PyTest Template/lighthouse/api_runner.py;C:/Auto Tests/PyTest Template/lighthouse/cleaner.py;C:/Auto Tests/PyTest Template/lighthouse/cli_runner.py;C:/Auto Tests/PyTest Template/lighthouse/config_lighthouse.py;C:/Auto Tests/PyTest Template/lighthouse/pagespeed_service.py;C:/Auto Tests/PyTest Template/lighthouse/processor_lighthouse.py;C:/Auto Tests/PyTest Template/POM/__init__.py;C:/Auto Tests/PyTest Template/POM/AuthPage.py;C:/Auto Tests/PyTest Template/POM/selectors.py;C:/Auto Tests/PyTest Template/README.md" />
+  </component>
+</project>
