@@ -1,3 +1,7 @@
+"""
+Модуль для выполнения тестов скорости с использованием Lighthouse.
+"""
+
 import sys
 import shutil
 import subprocess
@@ -15,8 +19,10 @@ from lighthouse.processor_lighthouse import parse_lighthouse_results, save_aggre
 
 
 def is_lighthouse_installed():
-    """Проверяет, установлен ли Lighthouse CLI. Если нет, проверяет npm и node."""
-    # Проверка установки Lighthouse
+    """
+    Проверяет, установлен ли Lighthouse CLI. Если нет, проверяет npm и node.
+    :return: True, если Lighthouse установлен, иначе False.
+    """
     lighthouse_cmd = shutil.which("lighthouse")
     if lighthouse_cmd is not None:
         try:
@@ -57,12 +63,35 @@ def is_lighthouse_installed():
     return False  # Если ничего не установлено, возвращаем False
 
 def is_virtualenv_active() -> bool:
-    """Проверяет, активно ли виртуальное окружение."""
+    """
+    Проверяет, активно ли виртуальное окружение.
+    :return: True, если виртуальное окружение активно, иначе False.
+    """
     return hasattr(sys, 'real_prefix') or (hasattr(sys, 'base_prefix') and sys.base_prefix != sys.prefix)
 
 class SpeedtestService:
+    """
+        Класс для выполнения тестов скорости и обработки результатов.
+
+        Атрибуты:
+        - iteration_counter: Счетчик итераций.
+        - iteration: Текущая итерация.
+        - config: Конфигурация маршрутов.
+        - base_report_dir: Директория для сохранения отчетов.
+        - temp_report_dir: Временная директория для отчетов.
+        - date: Текущая дата.
+        - dateTime: Текущая дата и время.
+        - environment: Текущее окружение.
+
+        Методы:
+        - __init__: Инициализирует объект SpeedtestService.
+        - run_speedtest: Выполняет тест скорости для указанного URL и сохраняет результаты.
+        """
     iteration_counter = 0
     def __init__(self):
+        """
+        Инициализирует объект SpeedtestService.
+        """
         SpeedtestService.iteration_counter += 1
         self.iteration = SpeedtestService.iteration_counter
         self.config = load_routes_config()
@@ -76,6 +105,12 @@ class SpeedtestService:
             raise RuntimeError("Lighthouse не установлен! Установите его командой: npm install -g lighthouse")
 
     def run_speedtest(self, page_url, route_name, iteration_count):
+        """
+        Выполняет тест скорости для указанного URL и сохраняет результаты
+        :param page_url: URL страницы для тестирования.
+        :param route_name: Название маршрута.
+        :param iteration_count: Количество итераций.
+        """
         results = []
         temp_dir = os.path.join(self.temp_report_dir, f"{self.date}_{self.environment}_{route_name}")
         os.makedirs(temp_dir, exist_ok=True)
@@ -106,6 +141,7 @@ class SpeedtestService:
         print("Очистка временных файлов ! ! !")
         clean_temp_files(temp_dir)
 
+"""Пример использования:"""
 if __name__ == "__main__":
     service = SpeedtestService()
     base_url = get_base_url()  # Получаем базовый URL для текущего окружения

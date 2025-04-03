@@ -1,10 +1,10 @@
 import os
 import shutil
 
-def clean_temp_files(report_dir: str):
+def clean_temp_files(temp_dir: str):
     """Удаляет временные файлы из директории отчетов."""
-    if os.path.exists(report_dir):
-        shutil.rmtree(report_dir)
-        print(f"Временные файлы в {report_dir} были удалены.")
+    if os.path.exists(temp_dir):
+        shutil.rmtree(temp_dir)
+        print(f"Временные файлы в {temp_dir} были удалены.")
     else:
-        print(f"Директория {report_dir} не существует, ничего не удалено.")
+        print(f"Директория {temp_dir} не существует, ничего не удалено.")

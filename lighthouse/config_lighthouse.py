@@ -7,14 +7,23 @@ CONFIG_PATH = os.path.join(os.path.dirname(__file__), "../URLs/base_urls.ini")
 ROUTES_CONFIG_PATH = os.path.join(os.path.dirname(__file__), "../URLs/routes.ini")
 print("Ищу конфиг по пути:", CONFIG_PATH)
 
-def load_routes_config():
-    """Загружает список тестируемых страниц из base_urls.ini"""
+
+def load_routes_config()-> configparser.ConfigParser:
+    """
+    Загружает список тестируемых страниц из routes.ini.
+    :return: Объект ConfigParser с загруженными данными.
+    """
     config = configparser.ConfigParser()
     config.read(ROUTES_CONFIG_PATH, encoding="utf-8")
     return config
 
+
 def get_current_environment() -> str:
-    """Возвращает текущее окружение."""
+    """
+    Возвращает текущее окружение.
+    :return: Название текущего окружения.
+    :raises KeyError: Если отсутствует секция [environments] или ключ 'current' в base_urls.ini.
+    """
     config = configparser.ConfigParser()
     config.read(CONFIG_PATH, encoding="utf-8")
     if "environments" not in config or "current" not in config["environments"]:
@@ -22,8 +31,13 @@ def get_current_environment() -> str:
     return config["environments"]["current"]
 
 
-def get_base_url():
-    """Получает BASE_URL для текущего выбранного контура."""
+def get_base_url() -> str:
+    """
+    Получает BASE_URL для текущего выбранного контура.
+    :return: Базовый URL для текущего окружения.
+    :raises FileNotFoundError: Если файл конфигурации не найден.
+    :raises KeyError: Если отсутствует секция [environments] или ключ 'current' в base_urls.ini, или если текущий контур не найден.
+    """
     config = configparser.ConfigParser()
 
     print("Ищу конфиг по пути:", CONFIG_PATH)  # Выведет путь
@@ -44,8 +58,13 @@ def get_base_url():
     return config[current_env]["BASE_URL"]
 
 
-def get_route(route_name):
-    """Получает путь для указанного роута."""
+def get_route(route_name: str) -> str:
+    """
+    Получает путь для указанного роута.
+    :param route_name: Название роута.
+    :return: Путь для указанного роута.
+    :raises KeyError: Если роут не найден в routes.ini.
+    """
     config = configparser.ConfigParser()
     config.read(ROUTES_CONFIG_PATH, encoding="utf-8")
 
@@ -55,6 +74,10 @@ def get_route(route_name):
     return config["routes"][route_name]
 
 
-def get_full_url(route_name):
-    """Формирует полный URL для указанного роута."""
+def get_full_url(route_name: str) -> str:
+    """
+    Формирует полный URL для указанного роута.
+    :param route_name: Название роута.
+    :return: Полный URL для указанного роута.
+    """
     return f"{get_base_url().rstrip('/')}{get_route(route_name)}"
