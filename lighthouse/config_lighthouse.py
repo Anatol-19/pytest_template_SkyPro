@@ -15,8 +15,11 @@ def load_routes_config():
 
 def get_current_environment() -> str:
     """Возвращает текущее окружение."""
-    config = load_routes_config()
-    return config['environments']['current']
+    config = configparser.ConfigParser()
+    config.read(CONFIG_PATH, encoding="utf-8")
+    if "environments" not in config or "current" not in config["environments"]:
+        raise KeyError("Отсутствует секция [environments] или ключ 'current' в base_urls.ini")
+    return config["environments"]["current"]
 
 
 def get_base_url():
