@@ -1,3 +1,6 @@
+services/lighthouse/creds/service_account.json
+
+
 ### Byte-compiled / optimized / DLL files ###
 __pycache__/
 *.py[cod]
