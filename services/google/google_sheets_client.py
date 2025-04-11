@@ -2,6 +2,7 @@ import gspread
 from google.oauth2.service_account import Credentials
 from typing import Dict, List
 from gspread.exceptions import APIError
+import numpy as np
 
 
 class GoogleSheetsClient:
@@ -58,7 +59,19 @@ class GoogleSheetsClient:
         :param data: Словарь, где ключ — название колонки, значение — значение ячейки
         """
         headers = self._get_or_create_headers(data)
-        row = [data.get(h, "") for h in headers]
+
+        # Преобразуем значения в стандартные типы Python
+        processed_data = {}
+        for key, value in data.items():
+            if isinstance(value, (np.int64, np.int32)):  # Проверяем, является ли значение типом numpy.int64 или numpy.int32
+                processed_data[key] = int(value)  # Преобразуем в стандартный int
+            elif isinstance(value, (np.float64, np.float32)):  # Проверяем, является ли значение типом numpy.float64 или numpy.float32
+                processed_data[key] = float(value)  # Преобразуем в стандартный float
+            else:
+                processed_data[key] = value  # Оставляем как есть
+
+        # Формируем строку для добавления
+        row = [processed_data.get(h, "") for h in headers]
         self.sheet.append_row(row, value_input_option="USER_ENTERED")
 
     def _get_or_create_headers(self, data: Dict[str, any]) -> List[str]:

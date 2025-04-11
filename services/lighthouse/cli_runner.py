@@ -4,6 +4,7 @@ import subprocess
 import sys
 from datetime import datetime
 
+from services.lighthouse.config_lighthouse import get_temp_dir_for_route
 from services.lighthouse.processor_lighthouse import parse_lighthouse_results
 
 # Константа для команды Lighthouse
@@ -76,17 +77,17 @@ def run_local_lighthouse(route_key: str, route_url: str, iteration_count: int = 
     check_lighthouse_environment()  # Проверяем окружение
 
     date = datetime.now().strftime("%d-%m-%y")
-    date_time = datetime.now().strftime("%d-%m-%y_%H-%M-%S")
     environment = os.getenv("ENVIRONMENT", "local")
-    temp_dir = os.path.join("temp_reports", f"{date}_{environment}_{route_key}")
-    os.makedirs(temp_dir, exist_ok=True)
+
+    # Получаем временную директорию для роута
+    temp_dir = get_temp_dir_for_route(route_key, device, is_local=True)
 
     results = [] # Инициализация списка результатов
     json_paths = []  # Список для хранения путей к JSON-файлам
 
     try:
         for iteration in range(1, iteration_count + 1):
-            report_file = os.path.join(temp_dir, f"report_{date}_{environment}_{route_key}_{str(iteration)}.json")
+            report_file = os.path.join(temp_dir, f"Report_CLI_{date}_{environment}_{route_key}_{str(iteration)}.json")
             command = [
                 LIGHTHOUSE_CMD, route_url,
                 "--output=json",
