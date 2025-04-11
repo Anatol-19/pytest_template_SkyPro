@@ -1,15 +1,16 @@
+import json
 import os
 import shutil
 import subprocess
-import sys
 from datetime import datetime
 
-from services.lighthouse.config_lighthouse import get_temp_dir_for_route
+from services.lighthouse.configs.config_lighthouse import get_temp_dir_for_route
 from services.lighthouse.processor_lighthouse import parse_lighthouse_results
 
-# Константа для команды Lighthouse
-LIGHTHOUSE_CMD = shutil.which("lighthouse")
+
+LIGHTHOUSE_CMD = shutil.which("lighthouse") # Константа для команды Lighthouse
 _lighthouse_checked = False  # Глобальный флаг
+CONFIG_DIR = os.path.join(os.path.dirname(__file__), "configs")
 
 def check_lighthouse_environment():
     """
@@ -65,6 +66,19 @@ def check_npm_environment():
     except Exception as e:
         raise RuntimeError(f"Ошибка при проверке Node.js: {e}")
 
+def load_device_config(device: str) -> dict:
+    """
+    Загружает конфигурацию для указанного устройства (desktop или mobile).
+    Если конфигурация отсутствует, возвращает None.
+    :param device: Тип устройства (desktop или mobile).
+    :return: Словарь с конфигурацией или None.
+    """
+    config_file = os.path.join(CONFIG_DIR, f"config_{device}.json")
+    if os.path.exists(config_file):
+        with open(config_file, "r", encoding="utf-8") as file:
+            return json.load(file)
+    return None
+
 
 def run_local_lighthouse(route_key: str, route_url: str, iteration_count: int = 5, device: str = "desktop"):
     """
@@ -78,6 +92,21 @@ def run_local_lighthouse(route_key: str, route_url: str, iteration_count: int = 
 
     date = datetime.now().strftime("%d-%m-%y")
     environment = os.getenv("ENVIRONMENT", "local")
+
+    # Загружаем конфигурацию устройства
+    config = load_device_config(device)
+    if config:
+        print(f"[INFO] Используется конфигурация для устройства: {device}")
+        preset = config.get("settings", {}).get("formFactor", "desktop")
+        screen_emulation = config.get("settings", {}).get("screenEmulation", {})
+        throttling = config.get("settings", {}).get("throttling", {})
+        throttling_method = config.get("settings", {}).get("throttlingMethod", "simulate")
+    else:
+        print(f"[WARNING] Конфигурация для устройства '{device}' не найдена. Используются дефолтные параметры.")
+        preset = "perf" if device == "mobile" else "desktop"
+        screen_emulation = {}
+        throttling = {}
+        throttling_method = "simulate"
 
     # Получаем временную директорию для роута
     temp_dir = get_temp_dir_for_route(route_key, device, is_local=True)
@@ -94,10 +123,24 @@ def run_local_lighthouse(route_key: str, route_url: str, iteration_count: int = 
                 f"--output-path={report_file}",
                 "--chrome-flags=--headless --no-sandbox"
             ]
-            if device == "mobile":
-                command.append("--preset=mobile")
-            else:
-                command.append("--preset=desktop")
+            # Устанавливаем флаг preset
+            command.append(f"--preset={preset}")
+
+            # Добавляем параметры эмуляции экрана, если они указаны в конфигурации
+            if screen_emulation:
+                if "width" in screen_emulation:
+                    command.append(f"--emulated-screen-width={screen_emulation['width']}")
+                if "height" in screen_emulation:
+                    command.append(f"--emulated-screen-height={screen_emulation['height']}")
+                if "deviceScaleRatio" in screen_emulation:
+                    command.append(f"--emulated-device-scale-factor={screen_emulation['deviceScaleRatio']}")
+
+            # Добавляем параметры троттлинга
+            if throttling_method:
+                command.append(f"--throttling-method={throttling_method}")
+            if throttling:
+                for key, value in throttling.items():
+                    command.append(f"--throttling.{key}={value}")
 
             print(f"Запуск Lighthouse для: {route_url} - {device}, итерация: {str(iteration)}")
             result = subprocess.run(command, capture_output=True, text=True)

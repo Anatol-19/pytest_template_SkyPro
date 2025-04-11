@@ -3,20 +3,24 @@ import os
 import shutil
 from datetime import datetime
 from pathlib import Path
-
-
-# Определяем путь к конфигурационному файлу со списком страниц для проверки
-CONFIG_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../URLs/base_urls.ini"))
-ROUTES_CONFIG_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../URLs/routes.ini"))
-print("Ищу конфиг по пути:", CONFIG_PATH)
-if not os.path.exists(CONFIG_PATH):
-    raise FileNotFoundError(f"Файл конфигурации не найден: {CONFIG_PATH}")
+import inspect
 
 # Глобальная переменная
 BASE_URL = None # для хранения базового URL
-ROOT_DIR = Path(__file__).resolve().parents[2] # Определяем корневую директорию проекта
+
+ROOT_DIR = Path(__file__).resolve().parents[3] # Определяем корневую директорию проекта
+LIGHTHOUSE_DIR = ROOT_DIR / "services" / "lighthouse"  # Папка lighthouse
+URLS_DIR = ROOT_DIR / "URLs"  # Папка URLs
 REPORTS_DIR = ROOT_DIR / "Reports" / "reports_lighthouse" # Пути для хранения отчетов
 TEMP_REPORTS_DIR = REPORTS_DIR  / "temp_lighthouse" # Пути для хранения временных отчетов
+
+# Определяем путь к конфигурационному файлу со списком страниц для проверки
+CONFIG_PATH = URLS_DIR / "base_urls.ini"
+ROUTES_CONFIG_PATH = URLS_DIR / "routes.ini"
+
+print("Ищу конфиг по пути:", CONFIG_PATH)
+if not os.path.exists(CONFIG_PATH):
+    raise FileNotFoundError(f"Файл конфигурации не найден: {CONFIG_PATH}")
 
 
 def ensure_directories_exist():
@@ -111,13 +115,25 @@ def get_full_url(route_name: str) -> str:
 def get_temp_dir_for_route(route_key: str, device: str, is_local: bool) -> Path:
     """
     Возвращает путь к временной директории для конкретного роута и устройства.
+    Определяет вызывающий метод для установки префикса (CLI, API, CrUX).
     :param route_key: Ключ роута.
     :param device: Тип устройства (desktop или mobile).
     :param is_local: Флаг, указывающий на локальный запуск.
     :return: Путь к временной директории.
     """
     date = datetime.now().strftime("%d-%m-%y")
-    prefix = "local" if is_local else "api"
+
+    # Определяем вызывающий метод
+    caller = inspect.stack()[1].function
+    if caller == "run_local_tests":
+        prefix = "CLI"
+    elif caller == "run_api_tests" or caller == "run_api_aggregated_tests":
+        prefix = "API"
+    elif caller == "run_crux_data_collection":
+        prefix = "CrUX"
+    else:
+        prefix = "UNKNOWN"
+
     temp_dir = TEMP_REPORTS_DIR / f"{date}_{prefix}_{route_key}_{device}"
     temp_dir.mkdir(parents=True, exist_ok=True)
     return temp_dir
@@ -147,6 +163,24 @@ def cleanup_temp_files(temp_dir: Path):
         print(f"[INFO] Временные файлы удалены: {temp_dir}")
 
 
+def get_google_creds_path() -> Path:
+    """
+    Возвращает абсолютный путь к файлу учетных данных Google.
+    :return: Абсолютный путь к файлу учетных данных.
+    :raises ValueError: Если переменная окружения GS_CREDS не задана.
+    """
+    gs_creds = os.getenv("GS_CREDS")
+    if not gs_creds:
+        raise ValueError("Переменная окружения 'GS_CREDS' не задана.")
+
+    # Формируем абсолютный путь относительно папки lighthouse
+    creds_path = LIGHTHOUSE_DIR / gs_creds.lstrip("/")
+    if not creds_path.exists():
+        raise FileNotFoundError(f"Файл учетных данных не найден: {creds_path}")
+
+    return creds_path
+
+
 def get_worksheet_name(environment: str, is_local: bool) -> str:
     """
     Возвращает имя листа для текущего окружения и типа запуска.
@@ -167,3 +201,12 @@ def get_worksheet_name(environment: str, is_local: bool) -> str:
     if not worksheet_name:
         raise KeyError(f"Переменная окружения {worksheet_var} не найдена")
     return worksheet_name
+
+
+def clean_temp_files(temp_dir: str):
+    """Удаляет временные файлы из директории отчетов."""
+    if os.path.exists(temp_dir):
+        shutil.rmtree(temp_dir)
+        print(f"Временные файлы в {temp_dir} были удалены.")
+    else:
+        print(f"Директория {temp_dir} не существует, ничего не удалено.")

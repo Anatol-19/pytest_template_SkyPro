@@ -6,10 +6,12 @@
 1. Склонировать проект 'git clone "Pytest Template""'
 2. Установить зависимости
    - _Create a virtual environment:_
-     - `python -m venv venv` [//]: # (   -  )
+     - `python -m venv .venv`
+            или
+     - `py -m venv .venv`
    - _Activate the virtual environment:_
-     - On Windows `venv\Scripts\activate`
-     - On macOS/Linux `source venv/bin/activate`
+     - On Windows `.venv\Scripts\activate`
+     - On macOS/Linux `source .venv/bin/activate`
    - `pip install -r requirements.txt`
 3. Запустить тесты 'pytest'
     - `pytest -m performance`
@@ -47,13 +49,15 @@ py -m services.lighthouse.pagespeed_service
 │   └── ./google/                      # Google API
 │       ├── google_sheets_client.py    # Взаимодействие с таблицами и Гугл док
 │   └─── /lighthouse/                  # Основная логика работы с Lighthouse
+│       └── configs/                   # 
+│           ├── config_lighthouse.py   # 📌 Чтение настроек из config.ini
+│           └── Файлы ini и JSON       # 📌
 │       └── creds/                     # JSON  доступами к API Гугла для сохранения результатов
 │       ├── __init__.py                # Делает пакет импортируемым
 │       ├── cli_runner.py              # 📌 Lighthouse CLI
 │       ├── api_runner.py              # 📌 Google Lighthouse API
 │       ├── processor_lighthouse.py    # 📌 Парсинг и обработка результатов (ОБЩИЙ для локального и удалённого)
 │       ├── cleaner.py                 # 📌 Очистка временных файлов
-│       ├── config_lighthouse.py       # 📌 Чтение настроек из config.ini
 │       └── speedtest_service.py       # 📌 Главный сервис (запускает CLI/API + обработку)
 │── config.ini                         # 📌 Конфигурация проекта
 │── requirements.txt                   # Зависимости проекта

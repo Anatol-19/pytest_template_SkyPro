@@ -1,6 +1,8 @@
 """
 Модуль для выполнения тестов скорости с использованием Lighthouse.
 """
+import argparse
+from pathlib import Path
 import json
 import os
 import sys
@@ -12,19 +14,19 @@ from google.auth.exceptions import RefreshError
 from requests import RequestException
 
 from services.lighthouse.api_runner import run_lighthouse_api
-from services.lighthouse.processor_lighthouse import process_lighthouse_batch
+from services.lighthouse.processor_lighthouse import process_and_save_results
 
 # Добавляем корневую директорию проекта в sys.path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 
 from services.google.google_sheets_client import GoogleSheetsClient
 from services.lighthouse.cli_runner import run_local_lighthouse
-from services.lighthouse.config_lighthouse import get_base_url, load_routes_config, get_full_url, \
+from services.lighthouse.configs.config_lighthouse import get_base_url, load_routes_config, get_full_url, \
     get_current_environment, get_worksheet_name, REPORTS_DIR, TEMP_REPORTS_DIR, ensure_directories_exist, \
-    get_temp_dir_for_route
+    get_temp_dir_for_route, get_google_creds_path
 
-# Загружаем .env из папки lighthouse
-dotenv_path = os.path.join(os.path.dirname(__file__), 'config_lighthouse.env')
+# Загружаем .env из папки lighthouse/configs
+dotenv_path = os.path.join(os.path.dirname(__file__), 'configs', 'config_lighthouse.env')
 load_dotenv(dotenv_path)
 
 
@@ -59,16 +61,22 @@ class SpeedtestService:
         :param is_local: Флаг, указывающий на локальный запуск.
         :return: Экземпляр GoogleSheetsClient.
         """
-        credentials_path = os.path.join(os.path.dirname(__file__), os.getenv("GS_CREDS"))
+        credentials_env = os.getenv("GS_CREDS")
+        if not credentials_env:
+            raise ValueError(
+                "Переменная окружения 'GS_CREDS' не задана. Укажите путь к файлу с учетными данными в .env.")
+
+        credentials_path = get_google_creds_path()
+        # credentials_path = Path(__file__).parent / credentials_env
         spreadsheet_id = os.getenv("GS_SHEET_ID")
         worksheet_name = get_worksheet_name(self.environment, is_local)
 
-        if not credentials_path or not spreadsheet_id:
+        if not spreadsheet_id:
             raise RuntimeError("Не установлены переменные окружения для Google Sheets")
 
         try:
             return GoogleSheetsClient(
-                credentials_path=credentials_path,
+                credentials_path=str(credentials_path),
                 spreadsheet_id=spreadsheet_id,
                 worksheet_name=worksheet_name
             )
@@ -103,6 +111,20 @@ class SpeedtestService:
         return routes
 
 
+    @staticmethod
+    def load_config(mode: str) -> dict:
+        """
+        Загружает конфигурацию из файла в зависимости от режима.
+        :param mode: Режим запуска (desktop или mobile).
+        :return: Словарь с конфигурацией.
+        """
+        config_file = f"config_{mode}.json"
+        if not os.path.exists(config_file):
+            raise FileNotFoundError(f"Конфигурационный файл {config_file} не найден.")
+        with open(config_file, "r", encoding="utf-8") as file:
+            return json.load(file)
+
+
     def run_local_tests(self, route_keys: list, device_type: str, n_iteration: int):
         """
         Выполняет тесты с использованием локального Lighthouse CLI.
@@ -130,32 +152,66 @@ class SpeedtestService:
 
             json_paths = run_local_lighthouse(route_key, route_url, n_iteration, device_type)
 
-            process_lighthouse_batch(json_paths, route_key, device_type, google_client, is_local=True)
+            process_and_save_results(json_paths, route_key, device_type, google_client, is_local=True)
 
 
-    def run_api_tests(self, route_keys: list, device_type: str):
+    def run_api_aggregated_tests(self, route_keys: list, device_type: str, n_iteration: int = 3):
         """
-        Выполняет тесты с использованием Google Lighthouse API.
-        - вызывает run_lighthouse_api
-        - сохраняет 1 JSON
-        - вызывает processor_lighthouse.process_lighthouse_batch(json_paths=[json_path], ...)
-        :param route_keys:
+        Выполняет агрегируемый запуск по API для получения Core Web Vitals и ключевых метрик Lighthouse.
+        :param route_keys: Список ключей роутов.
+        :param device_type: Тип устройства (desktop или mobile).
+        :param n_iteration: Количество итераций для каждой страницы.
+        """
+        google_client = self._initialize_google_client(False)  # Удалённый запуск
+        routes = self.prepare_routes(route_keys) # Преобразуем ключи в список URL
+
+        for route_key, route_url in routes:
+            print(f"[DEBUG]: Запуск агрегируемого API Lighthouse для: {route_key} ({route_url})")
+
+            # Создаём временную папку для роута
+            temp_dir = get_temp_dir_for_route(route_key, device_type, True)
+            json_paths = []  # Список для хранения путей к JSON-файлам
+
+            for _ in range(n_iteration):
+                json_result = run_lighthouse_api(
+                    url=route_url,
+                    strategy=device_type,
+                    categories=["performance", "accessibility", "best-practices", "seo"]
+                )
+
+                json_path = self._save_api_result(json_result, route_key)
+                json_paths.append(json_path)
+
+            # Обработка и сохранение результатов
+            process_and_save_results(json_paths, route_key, device_type, google_client, is_local=False)
+
+    def run_crux_data_collection(self, route_keys: list, device_type: str):
+        """
+        Выполняет сбор CrUX данных (Chrome User Experience Report) для указанных роутов.
+        :param route_keys: Список ключей роутов.
         :param device_type: Тип устройства (desktop или mobile).
         """
-        # Инициализация GoogleSheetsClient
-        google_client = self._initialize_google_client(False) # Удалённый запуск
+        google_client = self._initialize_google_client(False)  # Удалённый запуск
+        routes = self.prepare_routes(route_keys)
 
-        routes = self.prepare_routes(route_keys)  # Преобразуем ключи в список URL
         for route_key, route_url in routes:
-            print(f"[DEBUG]: Запуск API Lighthouse для: {route_key} ({route_url})")
+            print(f"[DEBUG]: Сбор CrUX данных для: {route_key} ({route_url})")
 
-            temp_dir = self._keep_dir(f"{self.date}_{route_key}_{device_type}_A")
+            crux_data = run_lighthouse_api(
+                url=route_url,
+                strategy=device_type,
+                mode="field"  # Режим CrUX
+            )
 
-            json_result = run_lighthouse_api(route_url, strategy=device_type)
+            # Сохраняем CrUX данные в файл
+            temp_dir = get_temp_dir_for_route(route_key, device_type, True)
+            crux_file = os.path.join(temp_dir, "crux_data.json")
+            with open(crux_file, "w", encoding="utf-8") as f:
+                json.dump(crux_data, f, ensure_ascii=False, indent=2)
 
-            json_path = self._save_api_result(json_result, route_key)
-
-            process_lighthouse_batch([json_path], route_key, device_type, google_client, is_local=False)
+            print(f"[INFO]: CrUX данные сохранены для {route_key}: {crux_file}")
+            # Обработка и сохранение результатов
+            process_and_save_results([crux_file], route_key, device_type, google_client, is_local=False)
 
     def _keep_dir(self, route_key: str):
         temp_dir = os.path.join(self.temp_reports_dir, route_key)
@@ -189,8 +245,18 @@ class SpeedtestService:
 if __name__ == "__main__":
     base_url = get_base_url()  # Получаем базовый URL для текущего окружения
     iteration_count = 2  # Количество итераций можно изменить здесь
+    # device = "mobile"  # Тип устройства
     device = "desktop"  # Тип устройства
 
     service = SpeedtestService()
-    service.run_local_tests(["home"], device, iteration_count)
-    # service.run_api_tests(["home"], device)
+
+    # Запуск локальных тестов
+    # service.run_local_tests(["home"], device, iteration_count)
+
+    # Запуск агрегированного API теста
+    # service.run_api_aggregated_tests(["home"], device, iteration_count)
+
+    # Запуск CrUX теста
+    service.run_crux_data_collection(["home"], device)
+
+

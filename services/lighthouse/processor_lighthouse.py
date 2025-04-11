@@ -11,10 +11,11 @@ import json
 import os
 import csv
 from datetime import datetime
-from typing import List, Dict
+from typing import List
 import numpy as np
 
-from services.lighthouse.config_lighthouse import REPORTS_DIR, get_current_environment, get_full_url, get_worksheet_name
+from services.lighthouse.configs.config_lighthouse import REPORTS_DIR, get_current_environment, get_full_url, \
+    get_worksheet_name, cleanup_temp_files, TEMP_REPORTS_DIR
 
 
 def parse_lighthouse_results(json_file: str) -> dict | None:
@@ -33,7 +34,8 @@ def parse_lighthouse_results(json_file: str) -> dict | None:
             "fcp": data["audits"]["first-contentful-paint"]["numericValue"],
             "tbt": data["audits"]["total-blocking-time"]["numericValue"],
             "cls": data["audits"]["cumulative-layout-shift"]["numericValue"],
-            "si": data["audits"]["speed-index"]["numericValue"]
+            "si": data["audits"]["speed-index"]["numericValue"],
+            "tti": data["audits"]["interactive"]["numericValue"]
         }
     except Exception as e:
         print(f"[!] Ошибка при разборе файла {json_file}: {e}")
@@ -63,7 +65,7 @@ def aggregate_results(results: list) -> dict:
     return aggregated
 
 
-def save_aggregated_results_to_csv(aggregated: dict, route: str, is_local: bool = True):
+def save_aggregated_results_to_csv(aggregated: dict, route_key: str, is_local: bool = True) -> str:
     """
     Сохраняет агрегированные результаты в CSV-файл.
     :param aggregated: Словарь с агрегированными метриками.
@@ -72,7 +74,7 @@ def save_aggregated_results_to_csv(aggregated: dict, route: str, is_local: bool 
     """
     date_time = datetime.now().strftime("%Y%m%d_%H%M")
     mode = "local" if is_local else "api"
-    output_csv = REPORTS_DIR / f"aggregated_results_{date_time}_{mode}_{route}.csv"
+    output_csv = REPORTS_DIR / f"aggregated_{mode}_results_{date_time}_{route_key}.csv"
     os.makedirs(REPORTS_DIR, exist_ok=True)
 
     with open(output_csv, "w", newline="", encoding="utf-8") as file:
@@ -83,11 +85,12 @@ def save_aggregated_results_to_csv(aggregated: dict, route: str, is_local: bool 
             writer.writerow({"metric": metric, **values})
 
     print(f"[✔] Сохранено: {output_csv}")
+    return str(output_csv)
 
 
-def process_lighthouse_batch(json_paths: List[str], route_key: str,
-                              device_type: str,
-                              gsheet_client, is_local: bool = True):
+def process_and_save_results(json_paths: List[str], route_key: str,
+                             device_type: str,
+                             gsheet_client, is_local: bool = True):
     """
     Обрабатывает список JSON-файлов: парсинг, агрегация, сохранение в CSV и запись в Google Sheets.
     :param json_paths: Список путей к JSON-файлам.
@@ -97,6 +100,7 @@ def process_lighthouse_batch(json_paths: List[str], route_key: str,
     :param is_local: Флаг, указывающий на локальный запуск.
     """
 
+    temp_dir = TEMP_REPORTS_DIR
     # Парсинг JSON-файлов
     print(f"[DEBUG] Начало обработки JSON-файлов для роута: {route_key}")
     parsed_results = [parse_lighthouse_results(path) for path in json_paths]
@@ -107,7 +111,11 @@ def process_lighthouse_batch(json_paths: List[str], route_key: str,
 
     # Сохранение в CSV
     print(f"[DEBUG] Сохранение результатов в CSV для роута: {route_key}")
-    save_aggregated_results_to_csv(aggregated_results, route_key, is_local)
+    csv_file_path = save_aggregated_results_to_csv(aggregated_results, route_key, is_local)
+    # Очистка временных файлов
+    if temp_dir and os.path.exists(csv_file_path):
+        print(f"[DEBUG] Удаление временных результатов для роута: {route_key}")
+        cleanup_temp_files(temp_dir)
 
     # Запись в Google Sheets
     if gsheet_client:
@@ -141,6 +149,7 @@ def build_row(timestamp: str, project: str,
     :return: Список значений для строки.
     """
     flat = flatten_aggregated_metrics(aggregated)
+    flat = flatten_aggregated_metrics(aggregated)
     return {
         "timestamp": timestamp,
         "project": project,
@@ -153,24 +162,28 @@ def build_row(timestamp: str, project: str,
         "tbt_min": flat["tbt_min"],
         "cls_min": flat["cls_min"],
         "si_min": flat["si_min"],
+        "tti_min": flat["tti_min"],  # Добавлено TTI
         "performance_max": flat["performance_max"],
         "lcp_max": flat["lcp_max"],
         "fcp_max": flat["fcp_max"],
         "tbt_max": flat["tbt_max"],
         "cls_max": flat["cls_max"],
         "si_max": flat["si_max"],
+        "tti_max": flat["tti_max"],  # Добавлено TTI
         "performance_mean": flat["performance_mean"],
         "lcp_mean": flat["lcp_mean"],
         "fcp_mean": flat["fcp_mean"],
         "tbt_mean": flat["tbt_mean"],
         "cls_mean": flat["cls_mean"],
         "si_mean": flat["si_mean"],
+        "tti_mean": flat["tti_mean"],  # Добавлено TTI
         "performance_p90": flat["performance_p90"],
         "lcp_p90": flat["lcp_p90"],
         "fcp_p90": flat["fcp_p90"],
         "tbt_p90": flat["tbt_p90"],
         "cls_p90": flat["cls_p90"],
         "si_p90": flat["si_p90"],
+        "tti_p90": flat["tti_p90"],  # Добавлено TTI
     }
 
 
