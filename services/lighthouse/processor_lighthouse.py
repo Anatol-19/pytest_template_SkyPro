@@ -18,17 +18,20 @@ from services.lighthouse.configs.config_lighthouse import REPORTS_DIR, get_curre
     get_worksheet_name, cleanup_temp_files, TEMP_REPORTS_DIR
 
 
-def parse_lighthouse_results(json_file: str) -> dict | None:
+def parse_lighthouse_results(json_file: str, include_extended_metrics: bool = False) -> dict | None:
     """
     Парсит JSON-отчет Lighthouse и извлекает ключевые метрики.
     Возвращает None при ошибке.
     :param json_file: Путь к JSON-файлу отчета Lighthouse.
+    :param include_extended_metrics: Флаг для включения расширенных метрик.
     :return: Словарь с ключевыми метриками.
     """
     try:
         with open(json_file, "r", encoding="utf-8") as file:
             data = json.load(file)
-        return {
+
+        # Базовые метрики
+        result = {
             "performance": data["categories"]["performance"]["score"] * 100,
             "lcp": data["audits"]["largest-contentful-paint"]["numericValue"],
             "fcp": data["audits"]["first-contentful-paint"]["numericValue"],
@@ -36,6 +39,59 @@ def parse_lighthouse_results(json_file: str) -> dict | None:
             "cls": data["audits"]["cumulative-layout-shift"]["numericValue"],
             "si": data["audits"]["speed-index"]["numericValue"],
             "tti": data["audits"]["interactive"]["numericValue"]
+        }
+
+        # Расширенные метрики (если включены)
+        if include_extended_metrics:
+            result.update({
+                "fmp": data["audits"].get("first-meaningful-paint", {}).get("numericValue", 0),
+                "estimated_input_latency": data["audits"].get("estimated-input-latency", {}).get("numericValue", 0),
+                "server_response_time": data["audits"].get("server-response-time", {}).get("numericValue", 0),
+                "resource_sizes": {
+                    "js": data["audits"].get("resource-summary", {}).get("details", {}).get("items", [{}])[0].get("size", 0),
+                    "css": data["audits"].get("resource-summary", {}).get("details", {}).get("items", [{}])[1].get("size", 0),
+                    "images": data["audits"].get("resource-summary", {}).get("details", {}).get("items", [{}])[2].get("size", 0)
+                },
+                "http_requests": data["audits"].get("network-requests", {}).get("details", {}).get("items", []),
+                "blocking_resources": data["audits"].get("render-blocking-resources", {}).get("details", {}).get("items", []),
+                "time_spent": {
+                    "parsing": data["audits"].get("mainthread-work-breakdown", {}).get("details", {}).get("items", [{}])[0].get("duration", 0),
+                    "scripting": data["audits"].get("mainthread-work-breakdown", {}).get("details", {}).get("items", [{}])[1].get("duration", 0),
+                    "rendering": data["audits"].get("mainthread-work-breakdown", {}).get("details", {}).get("items", [{}])[2].get("duration", 0)
+                },
+                "categories": {
+                    "seo": data["categories"]["seo"]["score"] * 100,
+                    "best_practices": data["categories"]["best-practices"]["score"] * 100,
+                    "accessibility": data["categories"]["accessibility"]["score"] * 100,
+                    "pwa": data["categories"]["pwa"]["score"] * 100
+                }
+            })
+
+        return result
+    except Exception as e:
+        print(f"[!] Ошибка при разборе файла {json_file}: {e}")
+        return None
+
+
+def parse_crux_results(json_file: str) -> dict | None:
+    """
+    Парсит JSON-отчет CrUX и извлекает ключевые метрики.
+    Возвращает None при ошибке.
+    :param json_file: Путь к JSON-файлу отчета CrUX.
+    :return: Словарь с ключевыми метриками.
+    """
+    try:
+        with open(json_file, "r", encoding="utf-8") as file:
+            data = json.load(file)
+
+        # Извлекаем метрики из CrUX данных
+        metrics = data.get("loadingExperience", {}).get("metrics", {})
+        return {
+            "LCP": metrics.get("LARGEST_CONTENTFUL_PAINT_MS", {}).get("percentile", 0),
+            "FID": metrics.get("FIRST_INPUT_DELAY_MS", {}).get("percentile", 0),
+            "CLS": metrics.get("CUMULATIVE_LAYOUT_SHIFT_SCORE", {}).get("percentile", 0),
+            "FCP": metrics.get("FIRST_CONTENTFUL_PAINT_MS", {}).get("percentile", 0),
+            "TTFB": metrics.get("TIME_TO_FIRST_BYTE", {}).get("percentile", 0)
         }
     except Exception as e:
         print(f"[!] Ошибка при разборе файла {json_file}: {e}")
@@ -51,7 +107,7 @@ def aggregate_results(results: list) -> dict:
     results = [r for r in results if r is not None]
     if not results:
         raise ValueError("[!] Нет валидных результатов для агрегации.")
-        return {}  # Возвращаем пустой словарь или обрабатываем по-другому
+
 
     aggregated = {}
     for metric in results[0].keys():
@@ -86,6 +142,39 @@ def save_aggregated_results_to_csv(aggregated: dict, route_key: str, is_local: b
 
     print(f"[✔] Сохранено: {output_csv}")
     return str(output_csv)
+
+
+def process_crux_results(crux_data: str, route_key: str,
+                         device: str, gsheet_client,
+                         worksheet_name: str):
+    """
+    Обрабатывает CrUX данные и отправляет их в Google Sheets.
+    :param worksheet_name:
+    :param crux_data:  с данными от API CrUX.
+    :param route_key: Ключ роута.
+    :param device: Тип устройства ("desktop" или "mobile").
+    :param gsheet_client: Клиент для работы с Google Sheets.
+    """
+    # Парсим CrUX данные
+    crux_metrics = parse_crux_results(crux_data)
+    if not crux_metrics:
+        print(f"[!] Нет данных для роута {route_key}.")
+        return
+
+    # Формируем строку для Google Sheets
+    timestamp = datetime.now().strftime("%Y.%m.%d %H:%M:%S")
+    row = {
+        "timestamp": timestamp,
+        "route_key": route_key,
+        "device": device,
+        **crux_metrics
+    }
+
+    # Отправляем данные в Google Sheets
+    if gsheet_client:
+        print(f"[DEBUG] Запись CrUX данных в Google Sheets для роута: {route_key}")
+        gsheet_client.append_result(row)
+        print(f"[✔] CrUX данные успешно загружены в Google Sheets {worksheet_name}")
 
 
 def process_and_save_results(json_paths: List[str], route_key: str,

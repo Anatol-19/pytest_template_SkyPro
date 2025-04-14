@@ -14,7 +14,7 @@ from google.auth.exceptions import RefreshError
 from requests import RequestException
 
 from services.lighthouse.api_runner import run_lighthouse_api
-from services.lighthouse.processor_lighthouse import process_and_save_results
+from services.lighthouse.processor_lighthouse import process_and_save_results, process_crux_results
 
 # Добавляем корневую директорию проекта в sys.path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
@@ -53,6 +53,7 @@ class SpeedtestService:
         self.date = datetime.now().strftime("%d-%m-%y")
         self.dateTime = datetime.now().strftime("%d-%m-%y_%H-%M-%S")
         self.environment = get_current_environment()
+        self.worksheet_name : str
 
 
     def _initialize_google_client(self, is_local: bool) -> GoogleSheetsClient:
@@ -69,7 +70,7 @@ class SpeedtestService:
         credentials_path = get_google_creds_path()
         # credentials_path = Path(__file__).parent / credentials_env
         spreadsheet_id = os.getenv("GS_SHEET_ID")
-        worksheet_name = get_worksheet_name(self.environment, is_local)
+        self.worksheet_name = get_worksheet_name(self.environment, is_local)
 
         if not spreadsheet_id:
             raise RuntimeError("Не установлены переменные окружения для Google Sheets")
@@ -78,7 +79,7 @@ class SpeedtestService:
             return GoogleSheetsClient(
                 credentials_path=str(credentials_path),
                 spreadsheet_id=spreadsheet_id,
-                worksheet_name=worksheet_name
+                worksheet_name=self.worksheet_name
             )
         except RefreshError as e:
             print(f"Ошибка аутентификации: {e}")
@@ -211,7 +212,9 @@ class SpeedtestService:
 
             print(f"[INFO]: CrUX данные сохранены для {route_key}: {crux_file}")
             # Обработка и сохранение результатов
-            process_and_save_results([crux_file], route_key, device_type, google_client, is_local=False)
+            # process_and_save_results([crux_file], route_key, device_type, google_client, is_local=False)
+            process_crux_results(crux_file, route_key, device, google_client, service.worksheet_name)
+
 
     def _keep_dir(self, route_key: str):
         temp_dir = os.path.join(self.temp_reports_dir, route_key)
@@ -245,8 +248,8 @@ class SpeedtestService:
 if __name__ == "__main__":
     base_url = get_base_url()  # Получаем базовый URL для текущего окружения
     iteration_count = 2  # Количество итераций можно изменить здесь
-    # device = "mobile"  # Тип устройства
-    device = "desktop"  # Тип устройства
+    device = "mobile"  # Тип устройства
+    # device = "desktop"  # Тип устройства
 
     service = SpeedtestService()
 

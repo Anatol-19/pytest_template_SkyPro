@@ -91,6 +91,7 @@ def run_local_lighthouse(route_key: str, route_url: str, iteration_count: int = 
     check_lighthouse_environment()  # Проверяем окружение
 
     date = datetime.now().strftime("%d-%m-%y")
+    date_time = datetime.now().strftime("%d-%m-%y_%H-%M-%S")
     environment = os.getenv("ENVIRONMENT", "local")
 
     # Загружаем конфигурацию устройства
@@ -107,6 +108,9 @@ def run_local_lighthouse(route_key: str, route_url: str, iteration_count: int = 
         screen_emulation = {}
         throttling = {}
         throttling_method = "simulate"
+        user_agent
+        strategy
+
 
     # Получаем временную директорию для роута
     temp_dir = get_temp_dir_for_route(route_key, device, is_local=True)
@@ -126,6 +130,9 @@ def run_local_lighthouse(route_key: str, route_url: str, iteration_count: int = 
             # Устанавливаем флаг preset
             command.append(f"--preset={preset}")
 
+            if user_agent:
+                command.append(f"--extra-headers=\"User-Agent: {user_agent}\"")
+
             # Добавляем параметры эмуляции экрана, если они указаны в конфигурации
             if screen_emulation:
                 if "width" in screen_emulation:
@@ -141,6 +148,9 @@ def run_local_lighthouse(route_key: str, route_url: str, iteration_count: int = 
             if throttling:
                 for key, value in throttling.items():
                     command.append(f"--throttling.{key}={value}")
+
+            if strategy:
+                command.append(f"--strategy={strategy}")
 
             print(f"Запуск Lighthouse для: {route_url} - {device}, итерация: {str(iteration)}")
             result = subprocess.run(command, capture_output=True, text=True)
