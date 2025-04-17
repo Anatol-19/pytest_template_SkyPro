@@ -112,19 +112,23 @@ def get_full_url(route_name: str) -> str:
     # return f"{get_base_url().rstrip('/')}{get_route(route_name)}"
 
 
-def get_temp_dir_for_route(route_key: str, device: str, is_local: bool) -> Path:
+def get_temp_dir_for_route(route_key: str, device: str, custom_run: bool = False) -> Path:
     """
-    Возвращает путь к временной директории для конкретного роута и устройства.
+    Возвращает путь к временной директории для хранения отчётов Lighthouse конкретного роута и устройства.
     Определяет вызывающий метод для установки префикса (CLI, API, CrUX).
+
     :param route_key: Ключ роута.
     :param device: Тип устройства (desktop или mobile).
-    :param is_local: Флаг, указывающий на локальный запуск.
     :return: Путь к временной директории.
     """
     date = datetime.now().strftime("%d-%m-%y")
 
     # Определяем вызывающий метод
-    caller = inspect.stack()[1].function
+    try:
+        caller = inspect.stack()[1].function
+    except IndexError:
+        caller = "UNKNOWN"
+
     if caller == "run_local_tests":
         prefix = "CLI"
     elif caller == "run_api_tests" or caller == "run_api_aggregated_tests":
@@ -134,8 +138,11 @@ def get_temp_dir_for_route(route_key: str, device: str, is_local: bool) -> Path:
     else:
         prefix = "UNKNOWN"
 
-    temp_dir = TEMP_REPORTS_DIR / f"{date}_{prefix}_{route_key}_{device}"
-    temp_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        temp_dir = TEMP_REPORTS_DIR / f"{date}_{prefix}_{route_key}_{device}"
+        temp_dir.mkdir(parents=True, exist_ok=True)
+    except Exception as e:
+        raise RuntimeError(f"Ошибка при создании директории: {e}")
     return temp_dir
 
 

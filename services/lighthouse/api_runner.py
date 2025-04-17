@@ -6,24 +6,27 @@ import urllib.request
 from typing import List, Optional
 
 
-def run_lighthouse_api(
-    url: str,
-    strategy: str = "mobile",
-    categories: Optional[List[str]] = None,
-    api_key: Optional[str] = None,
-    save_path: Optional[str] = None,
-    mode: str = "lab"
+def run_api_lighthouse(
+        route_key: str,
+        route_url: str,
+        iteration_count: int = 3,
+        device: str = "mobile",
+        mode: str = "lab",
+        categories: Optional[List[str]] = None,
+        # categories: list = None,
+        user_agent: str = None,
+        save_path: Optional[str] = None,
 ) -> dict:
     """
     Выполняет запрос к Google PageSpeed Insights API и сохраняет JSON-результат.
-
-    :param url: URL страницы для анализа
-    :param strategy: Тип устройства ("mobile" или "desktop")
-    :param categories: Список категорий (например: ["performance", "accessibility"])
-    :param api_key: Ключ API Google (опционально)
-    :param save_path: Путь для сохранения JSON-отчета
-    :param mode: Режим работы "lab" для "в моменте", "field" для CrUX
-    :return: dict — результат анализа Lighthouse
+    :param route_key: Ключ роута.
+    :param route_url: Полный URL для проверки.
+    :param iteration_count: Количество итераций.
+    :param device: Тип устройства ("mobile" или "desktop").
+    :param mode: Режим работы ("lab" для моментальных данных, "field" для CrUX).
+    :param categories: Список категорий (например: ["performance", "accessibility"]).
+    :param user_agent: Пользовательский User-Agent.
+    :return: Список результатов анализа Lighthouse.
     """
 
     base_url = "https://www.googleapis.com/pagespeedonline/v5/runPagespeed"
@@ -34,8 +37,8 @@ def run_lighthouse_api(
         print("API Key не указан. Используйте переменную окружения API_KEY или передайте ключ в параметрах.")
 
     params = {
-        "url": url,
-        "strategy": strategy,
+        "url": route_url,
+        "strategy": device,
         "key": api_key
     }
 

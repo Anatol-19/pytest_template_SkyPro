@@ -13,7 +13,7 @@ from dotenv import load_dotenv
 from google.auth.exceptions import RefreshError
 from requests import RequestException
 
-from services.lighthouse.api_runner import run_lighthouse_api
+from services.lighthouse.api_runner import run_api_lighthouse
 from services.lighthouse.processor_lighthouse import process_and_save_results, process_crux_results
 
 # Добавляем корневую директорию проекта в sys.path
@@ -30,11 +30,73 @@ dotenv_path = os.path.join(os.path.dirname(__file__), 'configs', 'config_lightho
 load_dotenv(dotenv_path)
 
 
+def _save_api_result(json_result: dict, route_key: str, device_type: str) -> str:
+    """
+    Сохраняет результат API в файл и возвращает путь.
+    """
+    temp_dir = get_temp_dir_for_route(route_key, device_type)
+    json_path = os.path.join(temp_dir, "api_result.json")
+    with open(json_path, "w", encoding="utf-8") as f:
+        json.dump(json_result, f, ensure_ascii=False, indent=2)
+    return json_path
+
+
+def _check_site_availability(url: str) -> bool:
+    """
+    Проверяет доступность сайта.
+    :param url: URL сайта для проверки.
+    :return: True, если сайт доступен, иначе False.
+    """
+    try:
+        response = requests.get(url, timeout=10)
+        return response.status_code == 200
+    except RequestException:
+        return False
+
+
+def load_config(mode: str) -> dict:
+    """
+    Загружает конфигурацию из файла в зависимости от режима.
+    :param mode: Режим запуска (desktop или mobile).
+    :return: Словарь с конфигурацией.
+    """
+    config_file = f"config_{mode}.json"
+    if not os.path.exists(config_file):
+        raise FileNotFoundError(f"Конфигурационный файл {config_file} не найден.")
+    with open(config_file, "r", encoding="utf-8") as file:
+        return json.load(file)
+
+
+def prepare_routes(route_keys: list | str) -> list:
+    """
+    Формирует список кортежей (ключ, полный URL) для указанных ключей роутов.
+    :param route_keys: Список ключей роутов из routes.ini.
+    :return: Список кортежей (ключ, полный URL).
+    """
+
+    print(f"[DEBUG]: route_keys передан как: {route_keys} (тип: {type(route_keys)})")  # Отладка
+
+    if isinstance(route_keys, str):
+        route_keys = [route_keys]  # Преобразуем строку в список
+
+    routes = []  # Локальная переменная для хранения кортежей
+    for route_key in route_keys:
+        try:
+            full_url = get_full_url(route_key.strip())  # Убираем лишние пробелы
+
+            print(f"[DEBUG]: route_key: {route_key}, full_url: {full_url}")  # Отладка
+
+            routes.append((route_key, full_url))  # Связываем ключ с URL
+        except KeyError:
+            print(f"Роут с ключом '{route_key}' не найден в конфигурации.")
+    return routes
+
+
 class SpeedtestService:
     """
-        Класс для выполнения тестов скорости и обработки результатов.
-        Отвечает только за orchestration.
-        """
+    Класс для выполнения тестов скорости и обработки результатов.
+    Отвечает только за orchestration.
+    """
     iteration_counter = 0
 
 
@@ -87,46 +149,7 @@ class SpeedtestService:
             raise  # Повторно выбрасываем исключение, чтобы остановить выполнение
 
 
-    def prepare_routes(self, route_keys: list | str) -> list:
-        """
-        Формирует список кортежей (ключ, полный URL) для указанных ключей роутов.
-        :param route_keys: Список ключей роутов из routes.ini.
-        :return: Список кортежей (ключ, полный URL).
-        """
-
-        print(f"[DEBUG]: route_keys передан как: {route_keys} (тип: {type(route_keys)})")  # Отладка
-
-        if isinstance(route_keys, str):
-            route_keys = [route_keys]  # Преобразуем строку в список
-
-        routes = []  # Локальная переменная для хранения кортежей
-        for route_key in route_keys:
-            try:
-                full_url = get_full_url(route_key.strip())  # Убираем лишние пробелы
-
-                print(f"[DEBUG]: route_key: {route_key}, full_url: {full_url}")  # Отладка
-
-                routes.append((route_key, full_url))  # Связываем ключ с URL
-            except KeyError:
-                print(f"Роут с ключом '{route_key}' не найден в конфигурации.")
-        return routes
-
-
-    @staticmethod
-    def load_config(mode: str) -> dict:
-        """
-        Загружает конфигурацию из файла в зависимости от режима.
-        :param mode: Режим запуска (desktop или mobile).
-        :return: Словарь с конфигурацией.
-        """
-        config_file = f"config_{mode}.json"
-        if not os.path.exists(config_file):
-            raise FileNotFoundError(f"Конфигурационный файл {config_file} не найден.")
-        with open(config_file, "r", encoding="utf-8") as file:
-            return json.load(file)
-
-
-    def run_local_tests(self, route_keys: list, device_type: str, n_iteration: int):
+    def run_local_tests(self, route_keys: list, device_type: str, n_iteration: int = 5):
         """
         Выполняет тесты с использованием локального Lighthouse CLI.
         - вызывает run_local_lighthouse → сохраняет temp JSON-файлы
@@ -139,17 +162,17 @@ class SpeedtestService:
         # Инициализация GoogleSheetsClient
         google_client = self._initialize_google_client(True) # Локальный запуск
 
-        routes = self.prepare_routes(route_keys)  # Получаем список кортежей (ключ, URL)
+        routes = prepare_routes(route_keys)  # Получаем список кортежей (ключ, URL)
         for route_key, route_url in routes:
             print(f"[DEBUG]: Перед вызовом run_local_lighthouse: route_key={route_key}, route_url={route_url}")  # Отладка
 
             # Проверяем доступность сайта
-            if not self._check_site_availability(route_url):
+            if not _check_site_availability(route_url):
                 print(f"[ERROR] Сайт {route_url} недоступен. Пропускаем тест для роута {route_key}.")
                 continue
 
             # temp_dir = self._keep_dir(f"{self.date}_{route_key}_{device_type}_L")
-            temp_dir = get_temp_dir_for_route(route_key, device_type, True)
+            temp_dir = get_temp_dir_for_route(route_key, device_type)
 
             json_paths = run_local_lighthouse(route_key, route_url, n_iteration, device_type)
 
@@ -164,27 +187,28 @@ class SpeedtestService:
         :param n_iteration: Количество итераций для каждой страницы.
         """
         google_client = self._initialize_google_client(False)  # Удалённый запуск
-        routes = self.prepare_routes(route_keys) # Преобразуем ключи в список URL
+        routes = prepare_routes(route_keys) # Преобразуем ключи в список URL
 
         for route_key, route_url in routes:
             print(f"[DEBUG]: Запуск агрегируемого API Lighthouse для: {route_key} ({route_url})")
 
             # Создаём временную папку для роута
-            temp_dir = get_temp_dir_for_route(route_key, device_type, True)
+            temp_dir = get_temp_dir_for_route(route_key, device_type)
             json_paths = []  # Список для хранения путей к JSON-файлам
 
             for _ in range(n_iteration):
-                json_result = run_lighthouse_api(
-                    url=route_url,
-                    strategy=device_type,
+                json_result = run_api_lighthouse(
+                    route_url=route_url,
+                    device=device_type,
                     categories=["performance", "accessibility", "best-practices", "seo"]
                 )
 
-                json_path = self._save_api_result(json_result, route_key)
+                json_path = _save_api_result(json_result, route_key, device_type)
                 json_paths.append(json_path)
 
             # Обработка и сохранение результатов
             process_and_save_results(json_paths, route_key, device_type, google_client, is_local=False)
+
 
     def run_crux_data_collection(self, route_keys: list, device_type: str):
         """
@@ -193,19 +217,19 @@ class SpeedtestService:
         :param device_type: Тип устройства (desktop или mobile).
         """
         google_client = self._initialize_google_client(False)  # Удалённый запуск
-        routes = self.prepare_routes(route_keys)
+        routes = prepare_routes(route_keys)
 
         for route_key, route_url in routes:
             print(f"[DEBUG]: Сбор CrUX данных для: {route_key} ({route_url})")
 
-            crux_data = run_lighthouse_api(
-                url=route_url,
-                strategy=device_type,
+            crux_data = run_api_lighthouse(
+                route_url=route_url,
+                device=device_type,
                 mode="field"  # Режим CrUX
             )
 
             # Сохраняем CrUX данные в файл
-            temp_dir = get_temp_dir_for_route(route_key, device_type, True)
+            temp_dir = get_temp_dir_for_route(route_key, device_type)
             crux_file = os.path.join(temp_dir, "crux_data.json")
             with open(crux_file, "w", encoding="utf-8") as f:
                 json.dump(crux_data, f, ensure_ascii=False, indent=2)
@@ -214,34 +238,6 @@ class SpeedtestService:
             # Обработка и сохранение результатов
             # process_and_save_results([crux_file], route_key, device_type, google_client, is_local=False)
             process_crux_results(crux_file, route_key, device, google_client, service.worksheet_name)
-
-
-    def _keep_dir(self, route_key: str):
-        temp_dir = os.path.join(self.temp_reports_dir, route_key)
-        os.makedirs(temp_dir, exist_ok=True)
-        return temp_dir
-
-    def _check_site_availability(self, url: str) -> bool:
-        """
-        Проверяет доступность сайта.
-        :param url: URL сайта для проверки.
-        :return: True, если сайт доступен, иначе False.
-        """
-        try:
-            response = requests.get(url, timeout=10)
-            return response.status_code == 200
-        except RequestException:
-            return False
-
-    def _save_api_result(self, json_result: dict, route_key: str) -> str:
-        """
-        Сохраняет результат API в файл и возвращает путь.
-        """
-        temp_dir = self._keep_dir(route_key)
-        json_path = os.path.join(temp_dir, "api_result.json")
-        with open(json_path, "w", encoding="utf-8") as f:
-            json.dump(json_result, f, ensure_ascii=False, indent=2)
-        return json_path
 
 
 """Пример использования:"""
@@ -254,7 +250,7 @@ if __name__ == "__main__":
     service = SpeedtestService()
 
     # Запуск локальных тестов
-    service.run_local_tests(["home"], device, iteration_count)
+    # service.run_local_tests(["home"], device, iteration_count)
 
     # Запуск агрегированного API теста
     service.run_api_aggregated_tests(["home"], device, iteration_count)

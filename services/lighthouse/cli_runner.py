@@ -66,7 +66,7 @@ def check_npm_environment():
     except Exception as e:
         raise RuntimeError(f"Ошибка при проверке Node.js: {e}")
 
-def load_device_config(device: str) -> dict:
+def load_device_config(device: str) -> dict | None:
     """
     Загружает конфигурацию для указанного устройства (desktop или mobile).
     Если конфигурация отсутствует, возвращает None.
@@ -75,20 +75,45 @@ def load_device_config(device: str) -> dict:
     """
     config_file = os.path.join(CONFIG_DIR, f"config_{device}.json")
     if os.path.exists(config_file):
-        with open(config_file, "r", encoding="utf-8") as file:
-            return json.load(file)
+        try:
+            with open(config_file, "r", encoding="utf-8") as file:
+                return json.load(file)
+        except Exception as e:
+            print(f"[ERROR] Ошибка при загрузке конфигурации устройства '{device}': {e}")
     return None
 
 
-def run_local_lighthouse(route_key: str, route_url: str, iteration_count: int = 5, device: str = "desktop"):
+def run_local_lighthouse(
+        route_key: str,
+        route_url: str,
+        iteration_count: int = 5,
+        device: str = "desktop",
+        mode: str = "navigation",
+        categories: list = None,
+        user_agent: str = None,
+        strategy: str = None):
     """
-    Запускает локальный Lighthouse для одного URL.
+    Запускает локальный Lighthouse для одного URL с параметрами.
+    :param route_key: Ключ роута.
     :param route_url: Полный URL для проверки.
-    :param route_key: Ключ роута в ini
     :param iteration_count: Количество итераций.
     :param device: Тип устройства (desktop или mobile).
+    :param mode: Режим запуска (navigation, timespan, snapshot).
+    :param categories: Список категорий (performance, accessibility, best-practices, seo).
+    :param user_agent: Пользовательский User-Agent.
+    :param strategy: Стратегия (desktop, mobile).
     """
     check_lighthouse_environment()  # Проверяем окружение
+
+    # Устанавливаем категории по умолчанию, если они не указаны
+    if categories is None:
+        categories = ["performance", "accessibility", "best-practices", "seo"]
+
+    # Получаем временную директорию для роута
+    temp_dir = get_temp_dir_for_route(route_key, device)
+
+    results = [] # Инициализация списка результатов
+    json_paths = []  # Список для хранения путей к JSON-файлам
 
     date = datetime.now().strftime("%d-%m-%y")
     date_time = datetime.now().strftime("%d-%m-%y_%H-%M-%S")
@@ -108,30 +133,25 @@ def run_local_lighthouse(route_key: str, route_url: str, iteration_count: int = 
         screen_emulation = {}
         throttling = {}
         throttling_method = "simulate"
-        user_agent
-        strategy
-
-
-    # Получаем временную директорию для роута
-    temp_dir = get_temp_dir_for_route(route_key, device, is_local=True)
-
-    results = [] # Инициализация списка результатов
-    json_paths = []  # Список для хранения путей к JSON-файлам
+        user_agent = "Mozilla/5.0"
+        strategy = "desktop"
 
     try:
         for iteration in range(1, iteration_count + 1):
             report_file = os.path.join(temp_dir, f"Report_CLI_{date}_{environment}_{route_key}_{str(iteration)}.json")
             command = [
-                LIGHTHOUSE_CMD, route_url,
-                "--output=json",
-                f"--output-path={report_file}",
-                "--chrome-flags=--headless --no-sandbox"
-            ]
+            "lighthouse", route_url,
+            "--output=json", f"--output-path={report_file}",
+            "--chrome-flags=--headless --no-sandbox",
+            f"--preset={preset}",
+            f"--emulated-form-factor={device}",
+            f"--throttling-method={throttling_method}",
+            f"--mode={mode}",
+            f"--only-categories={','.join(categories)}"
+        ]
             # Устанавливаем флаг preset
-            command.append(f"--preset={preset}")
 
-            if user_agent:
-                command.append(f"--extra-headers=\"User-Agent: {user_agent}\"")
+
 
             # Добавляем параметры эмуляции экрана, если они указаны в конфигурации
             if screen_emulation:
@@ -142,13 +162,14 @@ def run_local_lighthouse(route_key: str, route_url: str, iteration_count: int = 
                 if "deviceScaleRatio" in screen_emulation:
                     command.append(f"--emulated-device-scale-factor={screen_emulation['deviceScaleRatio']}")
 
-            # Добавляем параметры троттлинга
+            # Добавляем параметры, если они заданы
+            if user_agent:
+                command.append(f"--extra-headers=\"User-Agent: {user_agent}\"")
             if throttling_method:
                 command.append(f"--throttling-method={throttling_method}")
             if throttling:
                 for key, value in throttling.items():
                     command.append(f"--throttling.{key}={value}")
-
             if strategy:
                 command.append(f"--strategy={strategy}")
 
