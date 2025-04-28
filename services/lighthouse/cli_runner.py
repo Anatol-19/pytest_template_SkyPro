@@ -111,6 +111,7 @@ def run_local_lighthouse(
 
     # Получаем временную директорию для роута
     temp_dir = get_temp_dir_for_route(route_key, device)
+    print(f"[DEBUG] Временная директория для роута {route_key}: {temp_dir}")
 
     results = [] # Инициализация списка результатов
     json_paths = []  # Список для хранения путей к JSON-файлам
@@ -131,17 +132,17 @@ def run_local_lighthouse(
         print(f"[WARNING] Конфигурация для устройства '{device}' не найдена. Используются дефолтные параметры.")
         preset = "perf" if device == "mobile" else "desktop"
         screen_emulation = {}
-        throttling = {}
         throttling_method = "simulate"
+        throttling = {}
         user_agent = "Mozilla/5.0"
         strategy = "desktop"
 
     try:
         for iteration in range(1, iteration_count + 1):
-            report_file = os.path.join(temp_dir, f"Report_CLI_{date}_{environment}_{route_key}_{str(iteration)}.json")
+            report_file = os.path.join(temp_dir, f"Report_CLI_{date}_{environment}_{route_key}_iter_{str(iteration)}.json")
             command = [
             "lighthouse", route_url,
-            "--output=json", f"--output-path={report_file}",
+            f"--output=json", f"--output-path={report_file}",
             "--chrome-flags=--headless --no-sandbox",
             f"--preset={preset}",
             f"--emulated-form-factor={device}",
@@ -149,10 +150,6 @@ def run_local_lighthouse(
             f"--mode={mode}",
             f"--only-categories={','.join(categories)}"
         ]
-            # Устанавливаем флаг preset
-
-
-
             # Добавляем параметры эмуляции экрана, если они указаны в конфигурации
             if screen_emulation:
                 if "width" in screen_emulation:
@@ -174,13 +171,14 @@ def run_local_lighthouse(
                 command.append(f"--strategy={strategy}")
 
             print(f"Запуск Lighthouse для: {route_url} - {device}, итерация: {str(iteration)}")
+            print(f"[DEBUG] Команда для запуска Lighthouse: {' '.join(command)}")
             result = subprocess.run(command, capture_output=True, text=True)
 
             if result.returncode != 0:
                 raise RuntimeError(f"Ошибка при запуске Lighthouse: {result.stderr}")
 
             if not os.path.exists(report_file):
-                print(f"Файл отчета не найден: {report_file}")
+                print(f"[ERROR] Файл отчета не найден(итерация {iteration}): {report_file}")
                 continue
 
             print(f"Обработка результатов для: {report_file}")

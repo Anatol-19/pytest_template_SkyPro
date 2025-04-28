@@ -25,8 +25,12 @@ if not os.path.exists(CONFIG_PATH):
 
 def ensure_directories_exist():
     """ Убедиться, что все необходимые директории существуют."""
-    REPORTS_DIR.mkdir(parents=True, exist_ok=True)
-    TEMP_REPORTS_DIR.mkdir(parents=True, exist_ok=True)
+    try:
+        REPORTS_DIR.mkdir(parents=True, exist_ok=True)
+        TEMP_REPORTS_DIR.mkdir(parents=True, exist_ok=True)
+        print(f"[INFO] Директории для отчетов и временных файлов проверены/созданы.")
+    except Exception as e:
+        raise RuntimeError(f"[ERROR] Ошибка при создании директорий: {e}")
 
 
 def load_routes_config()-> configparser.ConfigParser:
@@ -112,7 +116,7 @@ def get_full_url(route_name: str) -> str:
     # return f"{get_base_url().rstrip('/')}{get_route(route_name)}"
 
 
-def get_temp_dir_for_route(route_key: str, device: str, custom_run: bool = False) -> Path:
+def get_temp_dir_for_route(route_key: str, device: str) -> Path:
     """
     Возвращает путь к временной директории для хранения отчётов Lighthouse конкретного роута и устройства.
     Определяет вызывающий метод для установки префикса (CLI, API, CrUX).
@@ -121,28 +125,30 @@ def get_temp_dir_for_route(route_key: str, device: str, custom_run: bool = False
     :param device: Тип устройства (desktop или mobile).
     :return: Путь к временной директории.
     """
-    date = datetime.now().strftime("%d-%m-%y")
 
     # Определяем вызывающий метод
     try:
-        caller = inspect.stack()[1].function
+        stack = inspect.stack()
+        caller = stack[1].function  # Получаем имя вызывающего метода
     except IndexError:
         caller = "UNKNOWN"
 
     if caller == "run_local_tests":
         prefix = "CLI"
-    elif caller == "run_api_tests" or caller == "run_api_aggregated_tests":
+    elif caller in ["run_api_tests", "run_api_aggregated_tests"]:
         prefix = "API"
     elif caller == "run_crux_data_collection":
         prefix = "CrUX"
     else:
         prefix = "UNKNOWN"
 
+    date = datetime.now().strftime("%d-%m-%y")
+    temp_dir = TEMP_REPORTS_DIR / f"{date}_{prefix}_{route_key}_{device}"
     try:
-        temp_dir = TEMP_REPORTS_DIR / f"{date}_{prefix}_{route_key}_{device}"
         temp_dir.mkdir(parents=True, exist_ok=True)
+        print(f"[INFO] Временная директория создана: {temp_dir}")
     except Exception as e:
-        raise RuntimeError(f"Ошибка при создании директории: {e}")
+        raise RuntimeError(f"[ERROR] Ошибка при создании директории: {e}")
     return temp_dir
 
 

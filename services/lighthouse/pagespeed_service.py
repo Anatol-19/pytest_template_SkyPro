@@ -198,6 +198,7 @@ class SpeedtestService:
 
             for _ in range(n_iteration):
                 json_result = run_api_lighthouse(
+                    
                     route_url=route_url,
                     device=device_type,
                     categories=["performance", "accessibility", "best-practices", "seo"]
@@ -243,17 +244,17 @@ class SpeedtestService:
 """Пример использования:"""
 if __name__ == "__main__":
     base_url = get_base_url()  # Получаем базовый URL для текущего окружения
-    iteration_count = 3  # Количество итераций можно изменить здесь
+    iteration_count = 10  # Количество итераций можно изменить здесь
     # device = "mobile"  # Тип устройства
     device = "desktop"  # Тип устройства
 
     service = SpeedtestService()
 
     # Запуск локальных тестов
-    # service.run_local_tests(["home"], device, iteration_count)
+    service.run_local_tests(["home"], device, iteration_count)
 
     # Запуск агрегированного API теста
-    service.run_api_aggregated_tests(["home"], device, iteration_count)
+    # service.run_api_aggregated_tests(["home"], device, iteration_count)
 
     # Запуск CrUX теста
     # service.run_crux_data_collection(["home"], device)

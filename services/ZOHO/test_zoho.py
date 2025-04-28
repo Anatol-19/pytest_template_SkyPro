@@ -106,12 +106,10 @@ if __name__ == "__main__":
     api = ZohoAPI()
 
     # Задаём параметры запуска
-    start_date = "2025-04-01"
-    end_date = "2025-04-16"
+    start_date = "2025-04-15"
+    end_date = "2025-04-22"
     milestone_names = [
-        "Release #19",
-        "Release #19 hot fix",
-        "SEO release to release #19"
+        "Release #20"
     ]  # Замените на нужное название мейлстоуна
 
     # Используем уже инициализированные менеджеры из portal_data

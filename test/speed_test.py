@@ -1,3 +1,6 @@
+import json
+import os
+
 import pytest
 from services.lighthouse.pagespeed_service import SpeedtestService
 
