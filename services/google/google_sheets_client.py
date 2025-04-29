@@ -36,6 +36,7 @@ class GoogleSheetsClient:
         self.worksheet_name = worksheet_name
         self.client = self._authorize()
         self.sheet = self._open_sheet()
+        self._batch_rows = []  # ⚡ Для накопления данных перед массовой отправкой
 
     def _authorize(self):
         """Авторизация через сервисный аккаунт"""
@@ -54,25 +55,18 @@ class GoogleSheetsClient:
 
     def append_result(self, data: Dict[str, any]):
         """
-        Добавляет результат в конец таблицы. Если таблица пуста — создает заголовки.
+        Добавляет результат в память или сразу в конец таблицы. Если таблица пуста — создает заголовки.
 
         :param data: Словарь, где ключ — название колонки, значение — значение ячейки
         """
         headers = self._get_or_create_headers(data)
 
-        # Преобразуем значения в стандартные типы Python
-        processed_data = {}
-        for key, value in data.items():
-            if isinstance(value, (np.int64, np.int32)):  # Проверяем, является ли значение типом numpy.int64 или numpy.int32
-                processed_data[key] = int(value)  # Преобразуем в стандартный int
-            elif isinstance(value, (np.float64, np.float32)):  # Проверяем, является ли значение типом numpy.float64 или numpy.float32
-                processed_data[key] = float(value)  # Преобразуем в стандартный float
-            else:
-                processed_data[key] = value  # Оставляем как есть
+        processed_data = self._normalize_data(data)
 
         # Формируем строку для добавления
         row = [processed_data.get(h, "") for h in headers]
-        self.sheet.append_row(row, value_input_option="USER_ENTERED")
+        self._batch_rows.append(row)  # Теперь копим строки, а не шлём сразу
+        # self.sheet.append_row(row, value_input_option="USER_ENTERED")
 
     def _get_or_create_headers(self, data: Dict[str, any]) -> List[str]:
         """
@@ -100,3 +94,32 @@ class GoogleSheetsClient:
             self.sheet.update('1:1', [current_headers])
 
         return current_headers
+
+
+    def flush(self):
+        """
+        Отправляет накопленные строки в Google Sheets одним запросом.
+        """
+        if not self._batch_rows:
+            print("[DEBUG] Нет строк для отправки.")
+            return
+
+        print(f"[INFO] Отправка {len(self._batch_rows)} строк в Google Sheets...")
+
+        self.sheet.append_rows(self._batch_rows, value_input_option="USER_ENTERED")
+        self._batch_rows.clear()
+
+
+    def _normalize_data(self, data: Dict[str, any]) -> Dict[str, any]:
+        """
+        Приводит значения к стандартным типам данных Python.
+        """
+        processed_data = {}
+        for key, value in data.items():
+            if isinstance(value, (np.int64, np.int32)):  # Проверяем, является ли значение типом numpy.int64 или numpy.int32
+                processed_data[key] = int(value)  # Преобразуем в стандартный int
+            elif isinstance(value, (np.float64, np.float32)):  # Проверяем, является ли значение типом numpy.float64 или numpy.float32
+                processed_data[key] = float(value)  # Преобразуем в стандартный float
+            else:
+                processed_data[key] = value  # Оставляем как есть
+        return processed_data

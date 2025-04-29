@@ -179,7 +179,8 @@ def process_crux_results(crux_data: str, route_key: str,
 
 def process_and_save_results(json_paths: List[str], route_key: str,
                              device_type: str,
-                             gsheet_client, is_local: bool = True):
+                             gsheet_client, is_local: bool = True,
+                             keep_temp_files: bool = False):
     """
     Обрабатывает список JSON-файлов: парсинг, агрегация, сохранение в CSV и запись в Google Sheets.
     :param json_paths: Список путей к JSON-файлам.
@@ -205,6 +206,8 @@ def process_and_save_results(json_paths: List[str], route_key: str,
     if temp_dir and os.path.exists(csv_file_path):
         print(f"[DEBUG] Удаление временных результатов для роута: {route_key}")
         cleanup_temp_files(temp_dir)
+    else:
+        print(f"[INFO] Временные файлы сохранены для роута: {route_key} (keep_temp_files={keep_temp_files})")
 
     # Запись в Google Sheets
     if gsheet_client:
@@ -223,57 +226,34 @@ def process_and_save_results(json_paths: List[str], route_key: str,
 
 
 def build_row(timestamp: str, project: str,
-        full_url: str, route_key: str,
-        device_type: str, contour: str,
-        aggregated: dict) -> dict:
+              full_url: str, route_key: str,
+              device_type: str, contour: str,
+              aggregated: dict) -> dict:
     """
-    Формирует строку для записи в Google Sheets.
-    :param timestamp: Временная метка.
-    :param project: Название проекта.
-    :param full_url: Полный URL роута.
-    :param route_key: Ключ роута.
-    :param device_type: Тип устройства.
-    :param contour: Контур (окружение).
-    :param aggregated: Агрегированные метрики.
-    :return: Список значений для строки.
+    Формирует строку для записи в Google Sheets с чётким порядком полей.
     """
     flat = flatten_aggregated_metrics(aggregated)
-    flat = flatten_aggregated_metrics(aggregated)
-    return {
+
+    row = {
         "timestamp": timestamp,
         "project": project,
         "url": build_route_link(full_url, route_key),
         "device_type": device_type,
         "contour": contour,
-        "performance_min": flat["performance_min"],
-        "lcp_min": flat["lcp_min"],
-        "fcp_min": flat["fcp_min"],
-        "tbt_min": flat["tbt_min"],
-        "cls_min": flat["cls_min"],
-        "si_min": flat["si_min"],
-        "tti_min": flat["tti_min"],  # Добавлено TTI
-        "performance_max": flat["performance_max"],
-        "lcp_max": flat["lcp_max"],
-        "fcp_max": flat["fcp_max"],
-        "tbt_max": flat["tbt_max"],
-        "cls_max": flat["cls_max"],
-        "si_max": flat["si_max"],
-        "tti_max": flat["tti_max"],  # Добавлено TTI
-        "performance_mean": flat["performance_mean"],
-        "lcp_mean": flat["lcp_mean"],
-        "fcp_mean": flat["fcp_mean"],
-        "tbt_mean": flat["tbt_mean"],
-        "cls_mean": flat["cls_mean"],
-        "si_mean": flat["si_mean"],
-        "tti_mean": flat["tti_mean"],  # Добавлено TTI
-        "performance_p90": flat["performance_p90"],
-        "lcp_p90": flat["lcp_p90"],
-        "fcp_p90": flat["fcp_p90"],
-        "tbt_p90": flat["tbt_p90"],
-        "cls_p90": flat["cls_p90"],
-        "si_p90": flat["si_p90"],
-        "tti_p90": flat["tti_p90"],  # Добавлено TTI
     }
+
+    # Добавляем строго в нужном порядке метрики
+    metrics_order = [
+        "performance", "lcp", "fcp", "tbt", "cls", "si", "tti"
+    ]
+    stats_order = ["min", "max", "mean", "p90"]
+
+    for metric in metrics_order:
+        for stat in stats_order:
+            key = f"{metric}_{stat}"
+            row[key] = flat.get(key, "")
+
+    return row
 
 
 def flatten_aggregated_metrics(aggregated: dict) -> dict:

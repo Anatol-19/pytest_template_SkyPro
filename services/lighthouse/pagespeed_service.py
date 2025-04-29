@@ -149,7 +149,7 @@ class SpeedtestService:
             raise  # Повторно выбрасываем исключение, чтобы остановить выполнение
 
 
-    def run_local_tests(self, route_keys: list, device_type: str, n_iteration: int = 5):
+    def run_local_tests(self, route_keys: list, device_type: str, n_iteration: int = 10, keep_temp_files: bool = False):
         """
         Выполняет тесты с использованием локального Lighthouse CLI.
         - вызывает run_local_lighthouse → сохраняет temp JSON-файлы
@@ -158,6 +158,7 @@ class SpeedtestService:
         :param route_keys: Список ключей роутов из routes.ini.
         :param device_type: Тип устройства (desktop или mobile).
         :param n_iteration: Количество итераций для каждой страницы.
+        :param keep_temp_files: Сохранять временные JSON-файлы или нет.
         """
         # Инициализация GoogleSheetsClient
         google_client = self._initialize_google_client(True) # Локальный запуск
@@ -176,39 +177,56 @@ class SpeedtestService:
 
             json_paths = run_local_lighthouse(route_key, route_url, n_iteration, device_type)
 
-            process_and_save_results(json_paths, route_key, device_type, google_client, is_local=True)
+            process_and_save_results(json_paths, route_key, device_type, google_client, is_local=True, keep_temp_files=keep_temp_files)
 
 
-    def run_api_aggregated_tests(self, route_keys: list, device_type: str, n_iteration: int = 3):
+    def run_api_aggregated_tests(self, route_keys: list, device_type: str, n_iteration: int = 3,
+                                 keep_temp_files: bool = False):
         """
         Выполняет агрегируемый запуск по API для получения Core Web Vitals и ключевых метрик Lighthouse.
+
         :param route_keys: Список ключей роутов.
         :param device_type: Тип устройства (desktop или mobile).
-        :param n_iteration: Количество итераций для каждой страницы.
+        :param n_iteration: Количество итераций на каждый роут.
+        :param keep_temp_files: Сохранять временные файлы или нет.
         """
         google_client = self._initialize_google_client(False)  # Удалённый запуск
-        routes = prepare_routes(route_keys) # Преобразуем ключи в список URL
+        routes = prepare_routes(route_keys)  # Получаем пары route_key -> URL
 
         for route_key, route_url in routes:
             print(f"[DEBUG]: Запуск агрегируемого API Lighthouse для: {route_key} ({route_url})")
 
-            # Создаём временную папку для роута
-            temp_dir = get_temp_dir_for_route(route_key, device_type)
-            json_paths = []  # Список для хранения путей к JSON-файлам
+            temp_dir = get_temp_dir_for_route(route_key, device_type, prefix="API")
+            json_paths = []
 
-            for _ in range(n_iteration):
+            for iteration in range(1, n_iteration + 1):
                 json_result = run_api_lighthouse(
-                    
-                    route_url=route_url,
-                    device=device_type,
+                    url=route_url,
+                    strategy=device_type,
                     categories=["performance", "accessibility", "best-practices", "seo"]
                 )
+                if not json_result:
+                    print(f"[WARNING] Нет результата на итерации {iteration} для роута {route_key}")
+                    continue
 
-                json_path = _save_api_result(json_result, route_key, device_type)
+                json_path = os.path.join(temp_dir, f"Report_API_{iteration}.json")
+                with open(json_path, "w", encoding="utf-8") as f:
+                    json.dump(json_result, f, ensure_ascii=False, indent=2)
+
                 json_paths.append(json_path)
 
             # Обработка и сохранение результатов
-            process_and_save_results(json_paths, route_key, device_type, google_client, is_local=False)
+            process_and_save_results(
+                json_paths,
+                route_key,
+                device_type,
+                google_client,
+                is_local=False,
+                keep_temp_files=keep_temp_files
+            )
+
+        # После всех маршрутов
+        google_client.flush()
 
 
     def run_crux_data_collection(self, route_keys: list, device_type: str):
@@ -251,10 +269,10 @@ if __name__ == "__main__":
     service = SpeedtestService()
 
     # Запуск локальных тестов
-    service.run_local_tests(["home"], device, iteration_count)
+    # service.run_local_tests(["home"], device, iteration_count)
 
     # Запуск агрегированного API теста
-    # service.run_api_aggregated_tests(["home"], device, iteration_count)
+    service.run_api_aggregated_tests(["home"], device, iteration_count)
 
     # Запуск CrUX теста
     # service.run_crux_data_collection(["home"], device)
