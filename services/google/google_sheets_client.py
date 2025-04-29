@@ -1,93 +1,77 @@
 import gspread
-from google.oauth2.service_account import Credentials
-from typing import Dict, List
-from gspread.exceptions import APIError
 import numpy as np
+from typing import Dict, List, Optional, Any
+from gspread.exceptions import APIError, WorksheetNotFound
+from google.oauth2.service_account import Credentials
 
 
 class GoogleSheetsClient:
     """
-    Клиент для взаимодействия с Google Таблицами через сервисный аккаунт.
-    Позволяет добавлять строки с данными и управлять заголовками таблицы.
-
-    Пример использования:
-        client = GoogleSheetsClient(
-            credentials_path="service_account.json",
-            spreadsheet_id="your_spreadsheet_id_here",
-            worksheet_name="Lighthouse Results"
-        )
-
-        client.append_result({
-            "timestamp": "2025-04-07 15:00",
-            "url": "https://example.com",
-            "score": 92
-        })
+    Клиент для взаимодействия с Google Sheets:
+    - Поддерживает создание листов
+    - Добавление заголовков
+    - Построчную и пакетную запись
+    - Автоматическое добавление новых колонок
+    - Поддержка формул в ячейках
     """
 
-    def __init__(self, credentials_path: str, spreadsheet_id: str, worksheet_name: str):
-        """
-        Инициализация клиента и подключение к нужному листу таблицы.
-        :param credentials_path: Путь к JSON-файлу с ключами сервисного аккаунта
-        :param spreadsheet_id: ID таблицы Google Sheets
-        :param worksheet_name: Название листа, с которым будет вестись работа
-        """
+    def __init__(self,
+                 credentials_path: str,
+                 spreadsheet_id: str,
+                 worksheet_name: str):
         self.credentials_path = credentials_path
         self.spreadsheet_id = spreadsheet_id
         self.worksheet_name = worksheet_name
         self.client = self._authorize()
         self.sheet = self._open_sheet()
-        self._batch_rows = []  # ⚡ Для накопления данных перед массовой отправкой
+        self._batch_rows = []  # Для накопления строк перед массовой отправкой
 
     def _authorize(self):
-        """Авторизация через сервисный аккаунт"""
         scopes = ["https://www.googleapis.com/auth/spreadsheets"]
-        credentials = Credentials.from_service_account_file(self.credentials_path, scopes=scopes)
+        credentials = Credentials.from_service_account_file(
+            self.credentials_path,
+            scopes=scopes
+        )
         return gspread.authorize(credentials)
 
     def _open_sheet(self):
-        """Открытие таблицы и листа. Создание листа, если не найден."""
-        spreadsheet = self.client.open_by_key(self.spreadsheet_id)
         try:
-            worksheet = spreadsheet.worksheet(self.worksheet_name)
-        except gspread.WorksheetNotFound:
-            worksheet = spreadsheet.add_worksheet(title=self.worksheet_name, rows=100, cols=20)
-        return worksheet
+            spreadsheet = self.client.open_by_key(self.spreadsheet_id)
+            try:
+                worksheet = spreadsheet.worksheet(self.worksheet_name)
+            except WorksheetNotFound:
+                worksheet = spreadsheet.add_worksheet(title=self.worksheet_name, rows=100, cols=30)
+                print(f"[INFO] Создан новый лист: {self.worksheet_name}")
+            return worksheet
+        except Exception as e:
+            print(f"[ERROR] Ошибка при открытии таблицы: {e}")
+            raise
 
-    def append_result(self, data: Dict[str, any]):
-        """
-        Добавляет результат в память или сразу в конец таблицы. Если таблица пуста — создает заголовки.
-
-        :param data: Словарь, где ключ — название колонки, значение — значение ячейки
-        """
+    def append_result(self, data: Dict[str, Any], raw_formula_fields: Optional[List[str]] = None):
         headers = self._get_or_create_headers(data)
-
         processed_data = self._normalize_data(data)
 
-        # Формируем строку для добавления
-        row = [processed_data.get(h, "") for h in headers]
-        self._batch_rows.append(row)  # Теперь копим строки, а не шлём сразу
-        # self.sheet.append_row(row, value_input_option="USER_ENTERED")
+        row = []
+        for h in headers:
+            val = processed_data.get(h, "")
+            if raw_formula_fields and h in raw_formula_fields:
+                row.append(val)  # не экранируем формулу
+            else:
+                row.append(val)
 
-    def _get_or_create_headers(self, data: Dict[str, any]) -> List[str]:
-        """
-        Проверяет, есть ли заголовки в таблице. Если нет — создает их.
-        Если появились новые ключи в data — добавляет их в заголовки.
+        self._batch_rows.append(row)
 
-        :param data: Словарь с текущими данными
-        :return: Список заголовков в нужном порядке
-        """
+    def _get_or_create_headers(self, data: Dict[str, Any]) -> List[str]:
         try:
             current_headers = self.sheet.row_values(1)
         except APIError:
             current_headers = []
 
-        # Если таблица пустая — создаем заголовки
         if not current_headers:
             headers = list(data.keys())
             self.sheet.insert_row(headers, 1)
             return headers
 
-        # Добавим недостающие заголовки (новые ключи)
         missing = [k for k in data.keys() if k not in current_headers]
         if missing:
             current_headers += missing
@@ -95,31 +79,31 @@ class GoogleSheetsClient:
 
         return current_headers
 
-
     def flush(self):
-        """
-        Отправляет накопленные строки в Google Sheets одним запросом.
-        """
         if not self._batch_rows:
             print("[DEBUG] Нет строк для отправки.")
             return
 
-        print(f"[INFO] Отправка {len(self._batch_rows)} строк в Google Sheets...")
+        try:
+            print(f"[INFO] Отправка {len(self._batch_rows)} строк в Google Sheets...")
+            self.sheet.append_rows(self._batch_rows, value_input_option="USER_ENTERED")
+            self._batch_rows.clear()
+        except Exception as e:
+            print(f"[ERROR] Не удалось записать данные в Google Sheets: {e}")
+            raise
 
-        self.sheet.append_rows(self._batch_rows, value_input_option="USER_ENTERED")
-        self._batch_rows.clear()
-
-
-    def _normalize_data(self, data: Dict[str, any]) -> Dict[str, any]:
-        """
-        Приводит значения к стандартным типам данных Python.
-        """
-        processed_data = {}
-        for key, value in data.items():
-            if isinstance(value, (np.int64, np.int32)):  # Проверяем, является ли значение типом numpy.int64 или numpy.int32
-                processed_data[key] = int(value)  # Преобразуем в стандартный int
-            elif isinstance(value, (np.float64, np.float32)):  # Проверяем, является ли значение типом numpy.float64 или numpy.float32
-                processed_data[key] = float(value)  # Преобразуем в стандартный float
+    def _normalize_data(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        result = {}
+        for key, val in data.items():
+            if isinstance(val, (np.int32, np.int64)):
+                result[key] = int(val)
+            elif isinstance(val, (np.float32, np.float64)):
+                result[key] = float(val)
             else:
-                processed_data[key] = value  # Оставляем как есть
-        return processed_data
+                result[key] = val
+        return result
+
+    @staticmethod
+    def prepare_link(anchor: str, url: str) -> str:
+        """Формирует строку для вставки гиперссылки в таблицу."""
+        return f'=HYPERLINK("{url}", "{anchor}")'

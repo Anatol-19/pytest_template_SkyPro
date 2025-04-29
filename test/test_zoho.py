@@ -1,129 +1,83 @@
-import sys
-import os
+# Новый каркас для объединённого сервиса генерации плана и интеграции с ZOHO/Google
 
-# Добавляем корневую директорию в PYTHONPATH
-sys.path.append(os.path.dirname(os.path.dirname(__file__)))
-from services.ZOHO.portal_data import user_manager, task_status_manager, defect_status_manager
 from services.ZOHO.Zoho_api_client import ZohoAPI
+import services.ZOHO.portal_data
 from services.Release_Test_Plan.TestPlanGenerator import TestPlanGenerator
+import os
+import json
 
 
-def get_tasks_by_milestone_name(milestone__name: str) -> list[dict]:
+class QAService:
     """
-    Получает задачи по названию мейлстоуна.
-    Параметры:
-        milestone_name (str): Название мейлстоуна.
-    Возвращает:
-        list[dict]: Список задач для указанного мейлстоуна.
+    Основной сервис, объединяющий работу с ZOHO API, генератором тест-плана и кэшированием статусов.
+
+    Этот класс предоставляет высокоуровневый интерфейс для:
+    - генерации тест-планов в формате Markdown,
+    - синхронизации статусов задач и багов из ZOHO,
+    - взаимодействия с менеджерами пользователей и статусов.
     """
-    api = ZohoAPI()
 
-    # Получаем ID мейлстоуна по его названию
-    milestone_id = api.get_milestone_id_by_name(milestone__name)
-    if milestone_id:
-        print(f"✅ Найден мейлстоун: {milestone__name} (ID: {milestone_id})")
+    def __init__(self):
+        """
+        Инициализация сервиса. Загружает необходимые менеджеры и клиента ZOHO API.
+        """
+        self.api = ZohoAPI()  # API-клиент для взаимодействия с ZOHO
+        self.users = services.ZOHO.portal_data.user_manager  # Менеджер пользователей (UserManager)
+        self.task_statuses = services.ZOHO.portal_data.task_status_manager  # Менеджер статусов задач (TaskStatusManager)
+        self.defect_statuses = services.ZOHO.portal_data.defect_status_manager  # Менеджер статусов багов (DefectStatusManager)
 
-        # Получаем задачи для найденного мейлстоуна
-        tasks = api.get_tasks(milestone_id)
+        # Генератор тест-плана, которому передаём все зависимости
+        self.generator = TestPlanGenerator(
+            users_mngr=self.users,
+            task_status_mngr=self.task_statuses,
+            defect_status_mngr=self.defect_statuses,
+            api_client=self.api
+        )
+
+    def generate_markdown_plan(self, filters: dict, sprint_name: str, start_date: str, end_date: str):
+        """
+        Генерирует тест-план в формате Markdown по заданным фильтрам задач.
+
+        :param filters: Словарь фильтров (например, created_after / milestone_id и т.п.)
+        :param sprint_name: Название спринта, используется для имени выходного файла
+        :param start_date: Начало тестового периода (строка в формате YYYY-MM-DD)
+        :param end_date: Конец тестового периода
+        """
+        self.generator.set_dates(start_date, end_date)
+        tasks = self.api.get_entities_by_filter(entity_type="tasks", **filters)
         if tasks:
-            print(f"✅ Найдено {len(tasks)} задач в мейлстоуне '{milestone__name}'")
-            return tasks
+            self.generator.generate_plan_for_tasks(tasks, output_file=f"plan_{sprint_name}.md")
         else:
-            print(f"❌ Не удалось получить задачи для мейлстоуна '{milestone__name}'")
-    else:
-        print(f"❌ Мейлстоун с названием '{milestone__name}' не найден")
+            print("⚠️ Не удалось найти задачи по заданным фильтрам.")
 
-    return []
+    def sync_statuses_from_zoho(self, force=False):
+        """
+        Загружает и кэширует статусы задач и дефектов из ZOHO API.
 
-
-def generate_test_plan(milestones: list[str]) -> None:
-    """
-    Генерирует тест-план для указанного мейлстоуна.
-    :param milestones : Название мейлстоуна.
-    :return: None
-    """
-    api = ZohoAPI()
-    all_tasks = []
-
-    for milestone_name in milestones:
-        if not milestone_name.strip():  # Пропускаем пустые или некорректные названия
-            print("⚠️ Пропущено пустое или некорректное название мейлстоуна.")
-            continue
-        milestone_id = api.get_milestone_id_by_name(milestone_name)
-        if milestone_id:
-            print(f"✅ Найден мейлстоун: {milestone_name} (ID: {milestone_id})")
-            tasks = api.get_tasks(milestone_id)
-            if tasks:
-                print(f"✅ Найдено {len(tasks)} задач в мейлстоуне '{milestone_name}'")
-                all_tasks.extend(tasks)
-            else:
-                print(f"❌ Не удалось получить задачи для мейлстоуна '{milestone_name}'")
+        :param force: Если True — принудительно перезаписывает кэш
+        """
+        cache_path = "services/ZOHO/status_cache.json"
+        if force or not os.path.exists(cache_path):
+            print("🔄 Синхронизация статусов из Zoho...")
+            task_statuses = self.api.get_blueprint_graph()
+            bug_statuses = self.api.get_bug_statuses()
+            status_data = {
+                "task_statuses": task_statuses,
+                "bug_statuses": bug_statuses
+            }
+            with open(cache_path, "w", encoding="utf-8") as f:
+                json.dump(status_data, f, ensure_ascii=False, indent=2)
+            self.generator.sync_statuses(task_statuses, bug_statuses)
         else:
-            print(f"❌ Мейлстоун с названием '{milestone_name}' не найден")
-
-    if all_tasks:
-        generator = TestPlanGenerator(user_manager, task_status_manager, defect_status_manager)
-        generator.generate_plan_for_tasks(all_tasks)
-    else:
-        print("❌ Не удалось сгенерировать тест-план, так как задачи не найдены.")
+            print("✅ Кэш статусов уже актуален. Загрузка из файла...")
+            with open(cache_path, "r", encoding="utf-8") as f:
+                status_data = json.load(f)
+            self.generator.sync_statuses(status_data["task_statuses"], status_data["bug_statuses"])
 
 
-    def get_tasks_in_date_range(self, start_date: str, end_date: str) -> list[dict]:
-        """
-        Получает задачи, созданные в указанном диапазоне дат.
-        :param start_date: Начальная дата (YYYY-MM-DD).
-        :param end_date: Конечная дата (YYYY-MM-DD).
-        :return: Список задач.
-        """
-        return self.get_entities_by_filter("tasks", created_after=start_date, created_before=end_date)
-
-    def get_bugs_in_date_range(self, start_date: str, end_date: str) -> list[dict]:
-        """
-        Получает баги, созданные в указанном диапазоне дат.
-        :param start_date: Начальная дата (YYYY-MM-DD).
-        :param end_date: Конечная дата (YYYY-MM-DD).
-        :return: Список багов.
-        """
-        return self.get_entities_by_filter("bugs", created_after=start_date, created_before=end_date)
-
-    def get_closed_bugs_in_date_range(self, start_date: str, end_date: str) -> list[dict]:
-        """
-        Получает баги, закрытые в указанном диапазоне дат.
-        :param start_date: Начальная дата (YYYY-MM-DD).
-        :param end_date: Конечная дата (YYYY-MM-DD).
-        :return: Список закрытых багов.
-        """
-        return self.get_entities_by_filter("bugs", closed_after=start_date, closed_before=end_date)
-
-
+# main.py примеры вызова
 if __name__ == "__main__":
-    # Загружаем переменные окружения
-    from dotenv import load_dotenv
-
-    load_dotenv()
-
-    # Инициализируем API
-    api = ZohoAPI()
-
-    # Задаём параметры запуска
-    start_date = "2025-04-15"
-    end_date = "2025-04-22"
-    milestone_names = [
-        "Release #20"
-    ]  # Замените на нужное название мейлстоуна
-
-    # Используем уже инициализированные менеджеры из portal_data
-    generator = TestPlanGenerator(user_manager, task_status_manager, defect_status_manager)
-
-    # Устанавливаем даты
-    generator.set_dates(start_date, end_date)
-
-    # Собираем задачи из всех мейлстоунов
-    all_tasks = []
-    for milestone_name in milestone_names:
-        tasks = generator.api.get_tasks_by_title(milestone_name)
-        all_tasks.extend(tasks)  # Добавляем задачи в общий список
-
-    # Генерируем общий тест-план
-    if all_tasks:
-        generator.generate_plan_for_tasks(all_tasks)
+    service = QAService()
+    filters = {"created_after": "2025-04-15", "created_before": "2025-04-22"}
+    service.sync_statuses_from_zoho()
+    service.generate_markdown_plan(filters, "Release #20", "2025-04-15", "2025-04-22")

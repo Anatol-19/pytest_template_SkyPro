@@ -165,8 +165,10 @@ def get_google_creds_path() -> Path:
     if not gs_creds:
         raise ValueError("Переменная окружения 'GS_CREDS' не задана.")
 
-    # Формируем абсолютный путь относительно папки lighthouse
-    creds_path = LIGHTHOUSE_DIR / gs_creds.lstrip("/")
+    creds_path = Path(gs_creds)
+    if not creds_path.is_absolute():
+        creds_path = ROOT_DIR / creds_path
+
     if not creds_path.exists():
         raise FileNotFoundError(f"Файл учетных данных не найден: {creds_path}")
 

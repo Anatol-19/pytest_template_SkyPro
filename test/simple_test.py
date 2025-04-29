@@ -1,3 +1,5 @@
+from requests.sessions import session
+
 from helper.StartSession import StartSession
 from POM.AuthPage import AuthPage
 import pytest

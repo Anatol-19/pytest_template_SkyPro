@@ -32,27 +32,27 @@
 
 ### 🗂️ Структура проекта
 ```bash
-/services/lighthouse/
-│
-├── configs/
-│   ├── config_lighthouse.py    # 📌 Чтение и управление настройками
-│   ├── base_urls.ini            # 📌 Окружения: DEV, TEST, STAGE, PROD
-│   ├── routes.ini               # 📌 Маршруты для тестирования
-│   ├── config_desktop.json      # 📌 Настройки эмуляции для desktop
-│   └── config_mobile.json       # 📌 Настройки эмуляции для mobile
-│
-├── cli_runner.py                # 📌 Запуск и управление Lighthouse CLI
-├── api_runner.py                # 📌 Взаимодействие с Google PageSpeed API
-├── processor_lighthouse.py      # 📌 Обработка, агрегация и сохранение результатов
-├── cleaner.py                   # 📌 Очистка временных файлов после тестов
-├── speedtest_service.py         # 📌 Оркестратор запусков и интеграций
-│
+└──/services/lighthouse/
+│  │
+│  ├── configs/
+│  │   ├── config_lighthouse.py    # 📌 Чтение и управление настройками
+│  │   ├── base_urls.ini            # 📌 Окружения: DEV, TEST, STAGE, PROD
+│  │   ├── routes.ini               # 📌 Маршруты для тестирования
+│  │   ├── config_desktop.json      # 📌 Настройки эмуляции для desktop
+│  │   └── config_mobile.json       # 📌 Настройки эмуляции для mobile
+│  │
+│  ├── cli_runner.py                # 📌 Запуск и управление Lighthouse CLI
+│  ├── api_runner.py                # 📌 Взаимодействие с Google PageSpeed API
+│  ├── processor_lighthouse.py      # 📌 Обработка, агрегация и сохранение результатов
+│  ├── cleaner.py                   # 📌 Очистка временных файлов после тестов
+│  ├── speedtest_service.py         # 📌 Оркестратор запусков и интеграций
+│  │
 ├── creds/                       # 📌 Файлы сервисных аккаунтов для доступа к Google API
-│
-/Reports/
-└── reports_lighthouse/
-    ├── temp_lighthouse/         # 📂 Временные результаты тестов
-    └── aggregated_reports/      # 📂 Финальные агрегированные отчеты
+│  │
+├── /Reports/
+│  └── reports_lighthouse/
+│      ├── temp_lighthouse/         # 📂 Временные результаты тестов
+│      └── aggregated_reports/      # 📂 Финальные агрегированные отчеты
 ```
     
 ## ⚙️ Конфигурация
