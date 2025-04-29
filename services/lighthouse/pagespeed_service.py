@@ -7,6 +7,7 @@ import json
 import os
 import sys
 from datetime import datetime
+from typing import Optional, Tuple, List
 
 import requests
 from dotenv import load_dotenv
@@ -21,7 +22,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 
 from services.google.google_sheets_client import GoogleSheetsClient
 from services.lighthouse.cli_runner import run_local_lighthouse
-from services.lighthouse.configs.config_lighthouse import get_base_url, load_routes_config, get_full_url, \
+from services.lighthouse.configs.config_lighthouse import get_route, get_base_url, load_routes_config, get_full_url, \
     get_current_environment, get_worksheet_name, REPORTS_DIR, TEMP_REPORTS_DIR, ensure_directories_exist, \
     get_temp_dir_for_route, get_google_creds_path
 
@@ -67,29 +68,23 @@ def load_config(mode: str) -> dict:
         return json.load(file)
 
 
-def prepare_routes(route_keys: list | str) -> list:
+def prepare_routes(route_keys: List[str], base_url: Optional[str] = None) -> List[Tuple[str, str]]:
     """
-    Формирует список кортежей (ключ, полный URL) для указанных ключей роутов.
-    :param route_keys: Список ключей роутов из routes.ini.
-    :return: Список кортежей (ключ, полный URL).
+    Подготавливает пары (route_key, full_url). Позволяет вручную передавать base_url.
     """
+    if base_url is None:
+        base_url = get_base_url().rstrip("/")
+    else:
+        base_url = base_url.rstrip("/")
 
-    print(f"[DEBUG]: route_keys передан как: {route_keys} (тип: {type(route_keys)})")  # Отладка
+    routes = []
+    for key in route_keys:
+        route_path = get_route(key)
+        full_url = f"{base_url}{route_path}"
+        routes.append((key, full_url))
 
-    if isinstance(route_keys, str):
-        route_keys = [route_keys]  # Преобразуем строку в список
-
-    routes = []  # Локальная переменная для хранения кортежей
-    for route_key in route_keys:
-        try:
-            full_url = get_full_url(route_key.strip())  # Убираем лишние пробелы
-
-            print(f"[DEBUG]: route_key: {route_key}, full_url: {full_url}")  # Отладка
-
-            routes.append((route_key, full_url))  # Связываем ключ с URL
-        except KeyError:
-            print(f"Роут с ключом '{route_key}' не найден в конфигурации.")
     return routes
+
 
 
 class SpeedtestService:
@@ -149,7 +144,12 @@ class SpeedtestService:
             raise  # Повторно выбрасываем исключение, чтобы остановить выполнение
 
 
-    def run_local_tests(self, route_keys: list, device_type: str, n_iteration: int = 10, keep_temp_files: bool = False):
+    def run_local_tests(self, route_keys: List[str],
+                        device_type: str,
+                        n_iteration: int = 10,
+                        keep_temp_files: bool = False,
+                        base_url: Optional[str] = None
+                        ):
         """
         Выполняет тесты с использованием локального Lighthouse CLI.
         - вызывает run_local_lighthouse → сохраняет temp JSON-файлы
@@ -159,11 +159,14 @@ class SpeedtestService:
         :param device_type: Тип устройства (desktop или mobile).
         :param n_iteration: Количество итераций для каждой страницы.
         :param keep_temp_files: Сохранять временные JSON-файлы или нет.
+        :param base_url: Базовый URL для тестов. Если не указан, используется из конфигурации.
         """
         # Инициализация GoogleSheetsClient
         google_client = self._initialize_google_client(True) # Локальный запуск
 
-        routes = prepare_routes(route_keys)  # Получаем список кортежей (ключ, URL)
+        if base_url is None:    # Если base_url не передан, используем из конфигурации
+            base_url = get_base_url()
+        routes = prepare_routes(route_keys, base_url=base_url) # Получаем список кортежей (ключ, URL)
         for route_key, route_url in routes:
             print(f"[DEBUG]: Перед вызовом run_local_lighthouse: route_key={route_key}, route_url={route_url}")  # Отладка
 
@@ -180,18 +183,24 @@ class SpeedtestService:
             process_and_save_results(json_paths, route_key, device_type, google_client, is_local=True, keep_temp_files=keep_temp_files)
 
 
-    def run_api_aggregated_tests(self, route_keys: list, device_type: str, n_iteration: int = 3,
-                                 keep_temp_files: bool = False):
+    def run_api_aggregated_tests(self, route_keys: list,
+                                 device_type: str,
+                                 n_iteration: int = 10,
+                                 keep_temp_files: bool = False,
+                                 base_url: Optional[str] = None
+                                 ):
         """
         Выполняет агрегируемый запуск по API для получения Core Web Vitals и ключевых метрик Lighthouse.
-
         :param route_keys: Список ключей роутов.
         :param device_type: Тип устройства (desktop или mobile).
         :param n_iteration: Количество итераций на каждый роут.
         :param keep_temp_files: Сохранять временные файлы или нет.
+        :param base_url: Базовый URL для тестов. Если не указан, используется из конфигурации.
         """
         google_client = self._initialize_google_client(False)  # Удалённый запуск
-        routes = prepare_routes(route_keys)  # Получаем пары route_key -> URL
+        if base_url is None:   # Если base_url не передан, используем из конфигурации
+            base_url = get_base_url()
+        routes = prepare_routes(route_keys, base_url=base_url) # Получаем пары route_key -> URL
 
         for route_key, route_url in routes:
             print(f"[DEBUG]: Запуск агрегируемого API Lighthouse для: {route_key} ({route_url})")
@@ -236,14 +245,17 @@ class SpeedtestService:
         :param device_type: Тип устройства (desktop или mobile).
         """
         google_client = self._initialize_google_client(False)  # Удалённый запуск
-        routes = prepare_routes(route_keys)
+
+
+        base_url = get_base_url()  # Или, при необходимости, параметризуй
+        routes = prepare_routes(route_keys, base_url=base_url)
 
         for route_key, route_url in routes:
             print(f"[DEBUG]: Сбор CrUX данных для: {route_key} ({route_url})")
 
             crux_data = run_api_lighthouse(
-                route_url=route_url,
-                device=device_type,
+                url=route_url,
+                strategy=device_type,
                 mode="field"  # Режим CrUX
             )
 
@@ -255,8 +267,7 @@ class SpeedtestService:
 
             print(f"[INFO]: CrUX данные сохранены для {route_key}: {crux_file}")
             # Обработка и сохранение результатов
-            # process_and_save_results([crux_file], route_key, device_type, google_client, is_local=False)
-            process_crux_results(crux_file, route_key, device, google_client, service.worksheet_name)
+            process_crux_results(crux_file, route_key, device_type, google_client, service.worksheet_name)
 
 
 """Пример использования:"""
