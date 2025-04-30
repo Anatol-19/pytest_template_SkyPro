@@ -3,24 +3,32 @@ import os
 import shutil
 from datetime import datetime
 from pathlib import Path
-import inspect
+from typing import Literal
 
 # Глобальная переменная
-BASE_URL = None # для хранения базового URL
+BASE_URL = None # Глобальный кэш base_url
 
-ROOT_DIR = Path(__file__).resolve().parents[3] # Определяем корневую директорию проекта
-LIGHTHOUSE_DIR = ROOT_DIR / "services" / "lighthouse"  # Папка lighthouse
-URLS_DIR = ROOT_DIR / "URLs"  # Папка URLs
-REPORTS_DIR = ROOT_DIR / "Reports" / "reports_lighthouse" # Пути для хранения отчетов
-TEMP_REPORTS_DIR = REPORTS_DIR  / "temp_lighthouse" # Пути для хранения временных отчетов
+# === 📁 Путь и директории проекта ===
+ROOT_DIR = Path(__file__).resolve().parents[3]              # Определяем корневую директорию проекта
+LIGHTHOUSE_DIR = ROOT_DIR / "services" / "lighthouse"       # Папка lighthouse
+URLS_DIR = ROOT_DIR / "URLs"                                # Папка URLs
+REPORTS_DIR = ROOT_DIR / "Reports" / "reports_lighthouse"   # Пути для хранения отчетов
+TEMP_REPORTS_DIR = REPORTS_DIR  / "temp_lighthouse"         # Пути для хранения временных отчетов
 
 # Определяем путь к конфигурационному файлу со списком страниц для проверки
 CONFIG_PATH = URLS_DIR / "base_urls.ini"
 ROUTES_CONFIG_PATH = URLS_DIR / "routes.ini"
 
-print("Ищу конфиг по пути:", CONFIG_PATH)
+# Названия шаблонных листов в Google Sheets для разных типов запусков
+TEMPLATE_SHEETS = {
+    "cli": "_CLI_Template",
+    "api": "_API_Template",
+    "crux": "_ChU_Template",
+}
+
+print("[INFO] Ищу конфиг по пути:", CONFIG_PATH)
 if not os.path.exists(CONFIG_PATH):
-    raise FileNotFoundError(f"Файл конфигурации не найден: {CONFIG_PATH}")
+    raise FileNotFoundError(f"[ERROR] Файл конфигурации не найден: {CONFIG_PATH}")
 
 
 def ensure_directories_exist():
@@ -68,19 +76,19 @@ def get_base_url() -> str:
         config = configparser.ConfigParser()
 
         if not os.path.exists(CONFIG_PATH):
-            raise FileNotFoundError(f"Файл конфигурации не найден: {CONFIG_PATH}")
+            raise FileNotFoundError(f"[ERROR] Файл конфигурации не найден: {CONFIG_PATH}")
 
         config.read(CONFIG_PATH, encoding="utf-8")
 
         if "environments" not in config or "current" not in config["environments"]:
-            raise KeyError("Отсутствует секция [environments] или ключ 'current' в base_urls.ini")
+            raise KeyError("[ERROR] Отсутствует секция [environments] или ключ 'current' в base_urls.ini")
 
         current_env = config["environments"]["current"]
         BASE_URL = config[current_env]["BASE_URL"]
-        print(f"указанный контур: {current_env} - {BASE_URL}")  # 🔍 Отладка. Проверим, загружены ли данные
+        print(f"[DEBUG] Указанный контур: {current_env} - {BASE_URL}")  # 🔍 Отладка. Проверим, загружены ли данные
 
         if current_env not in config:
-            raise KeyError(f"Контур '{current_env}' не найден в base_urls.ini")
+            raise KeyError(f"[ERROR] Контур '{current_env}' не найден в base_urls.ini")
 
     return BASE_URL
 
@@ -113,7 +121,6 @@ def get_full_url(route_name: str) -> str:
     print(
         f"[DEBUG]: base_url={base_url}, route_name={route_name}, route_path={route_path}, full_url={full_url}")  # Отладка
     return full_url
-    # return f"{get_base_url().rstrip('/')}{get_route(route_name)}"
 
 
 def get_temp_dir_for_route(route_key: str, device: str, prefix: str = "CLI") -> Path:
@@ -146,18 +153,24 @@ def get_report_path(route_key: str, device: str, is_local: bool) -> Path:
 
 
 def cleanup_temp_files(temp_dir: Path):
-    """
-    Удаляет временные файлы после завершения работы.
-    :param temp_dir: Путь к директории с временными файлами.
-    """
+    """Удаляет директорию с временными файлами."""
     if temp_dir.exists():
         shutil.rmtree(temp_dir)
         print(f"[INFO] Временные файлы удалены: {temp_dir}")
 
 
+def clean_temp_files(temp_dir: str):
+    """Удаляет временные файлы (строковая версия)."""
+    if os.path.exists(temp_dir):
+        shutil.rmtree(temp_dir)
+        print(f"Временные файлы в {temp_dir} были удалены.")
+    else:
+        print(f"Директория {temp_dir} не существует, ничего не удалено.")
+
+
 def get_google_creds_path() -> Path:
     """
-    Возвращает абсолютный путь к файлу учетных данных Google.
+    Возвращает абсолютный путь к файлу учетных данных Google -путь до файла с ключом сервисного аккаунта из переменной окружения GS_CREDS.
     :return: Абсолютный путь к файлу учетных данных.
     :raises ValueError: Если переменная окружения GS_CREDS не задана.
     """
@@ -170,37 +183,20 @@ def get_google_creds_path() -> Path:
         creds_path = ROOT_DIR / creds_path
 
     if not creds_path.exists():
-        raise FileNotFoundError(f"Файл учетных данных не найден: {creds_path}")
+        raise FileNotFoundError(f"[ERROR] Файл учетных данных не найден: {creds_path}")
 
     return creds_path
 
 
-def get_worksheet_name(environment: str, is_local: bool) -> str:
+def resolve_worksheet_name(environment: str, source: Literal["cli", "api", "crux"]) -> str:
     """
-    Возвращает имя листа для текущего окружения и типа запуска.
-    :param environment: Название текущего окружения (например, DEV, TEST, STAGE, PROD).
-    :param is_local: Флаг, указывающий на локальный запуск (True) или API (False).
-    :return: Имя листа для текущего окружения и типа запуска.
-    :raises KeyError: Если переменная окружения для листа не найдена.
+    Возвращает точное имя рабочего листа Google Sheets из переменных окружения.
     """
-    if not is_local:
-        # Для API всегда используется PROD
-        worksheet_var = "GS_WORKSHEET_PROD"
+    if source == "cli":
+        return os.getenv(f"GS_WORKSHEET_{environment.upper()}", "")
+    elif source == "api":
+        return os.getenv(f"GS_WORKSHEET_{environment.upper()}", "")
+    elif source == "crux":
+        return os.getenv("GS_WORKSHEET_CHUX", "")
     else:
-        # Для локального запуска выбираем по окружению
-        suffix = "_L" if environment.upper() == "PROD" else ""
-        worksheet_var = f"GS_WORKSHEET_{environment.upper()}{suffix}"
-
-    worksheet_name = os.getenv(worksheet_var)
-    if not worksheet_name:
-        raise KeyError(f"Переменная окружения {worksheet_var} не найдена")
-    return worksheet_name
-
-
-def clean_temp_files(temp_dir: str):
-    """Удаляет временные файлы из директории отчетов."""
-    if os.path.exists(temp_dir):
-        shutil.rmtree(temp_dir)
-        print(f"Временные файлы в {temp_dir} были удалены.")
-    else:
-        print(f"Директория {temp_dir} не существует, ничего не удалено.")
+        raise ValueError(f"Неизвестный источник: {source}")

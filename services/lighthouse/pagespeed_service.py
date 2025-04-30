@@ -1,13 +1,12 @@
 """
 Модуль для выполнения тестов скорости с использованием Lighthouse.
 """
-import argparse
-from pathlib import Path
 import json
 import os
+import pytest
 import sys
 from datetime import datetime
-from typing import Optional, Tuple, List
+from typing import Optional, Tuple, List, Literal
 
 import requests
 from dotenv import load_dotenv
@@ -22,9 +21,12 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 
 from services.google.google_sheets_client import GoogleSheetsClient
 from services.lighthouse.cli_runner import run_local_lighthouse
-from services.lighthouse.configs.config_lighthouse import get_route, get_base_url, load_routes_config, get_full_url, \
-    get_current_environment, get_worksheet_name, REPORTS_DIR, TEMP_REPORTS_DIR, ensure_directories_exist, \
-    get_temp_dir_for_route, get_google_creds_path
+from services.lighthouse.configs.config_lighthouse import (
+    get_route, get_base_url, load_routes_config, get_full_url,
+    get_current_environment, resolve_worksheet_name, REPORTS_DIR,
+    TEMP_REPORTS_DIR, ensure_directories_exist, get_temp_dir_for_route,
+    get_google_creds_path
+)
 
 # Загружаем .env из папки lighthouse/configs
 dotenv_path = os.path.join(os.path.dirname(__file__), 'configs', 'config_lighthouse.env')
@@ -69,6 +71,7 @@ def prepare_routes(route_keys: List[str], base_url: Optional[str] = None) -> Lis
 
     return routes
 
+@pytest.mark.skip(reason="Класс предназначен не для тестов")
 class SpeedtestService:
     """
     Класс для выполнения тестов скорости и обработки результатов.
@@ -91,16 +94,16 @@ class SpeedtestService:
         self.environment = get_current_environment()
         self.worksheet_name: str
 
-    def _initialize_google_client(self, is_local: bool) -> GoogleSheetsClient:
+    def _initialize_google_client(self, source: Literal["cli", "api", "crux"]) -> GoogleSheetsClient:
         """
         Инициализирует клиента Google Sheets.
         """
         credentials_path = get_google_creds_path()
         spreadsheet_id = os.getenv("GS_SHEET_ID")
-        self.worksheet_name = get_worksheet_name(self.environment, is_local)
+        self.worksheet_name = resolve_worksheet_name(self.environment, source)
 
         if not spreadsheet_id:
-            raise RuntimeError("Не установлены переменные окружения для Google Sheets")
+            raise RuntimeError("[ERROR] Не установлены переменные окружения для Google Sheets")
 
         try:
             return GoogleSheetsClient(
@@ -109,7 +112,7 @@ class SpeedtestService:
                 worksheet_name=self.worksheet_name
             )
         except RefreshError as e:
-            print(f"Ошибка аутентификации: {e}")
+            print(f"[ERROR] Ошибка аутентификации: {e}")
             raise
 
     def _get_routes_from_config(self) -> List[str]:
@@ -126,7 +129,7 @@ class SpeedtestService:
         """
         Выполняет тесты с использованием локального Lighthouse CLI.
         """
-        google_client = self._initialize_google_client(True)
+        google_client = self._initialize_google_client("cli")
         base_url = base_url or get_base_url()
         route_keys = route_keys or self._get_routes_from_config()
         routes = prepare_routes(route_keys, base_url=base_url)
@@ -146,7 +149,7 @@ class SpeedtestService:
         """
         Выполняет запуск Lighthouse через PageSpeed API с агрегацией.
         """
-        google_client = self._initialize_google_client(False)
+        google_client = self._initialize_google_client("api")
         base_url = base_url or get_base_url()
         route_keys = route_keys or self._get_routes_from_config()
         routes = prepare_routes(route_keys, base_url=base_url)
@@ -180,7 +183,7 @@ class SpeedtestService:
         """
         Выполняет сбор CrUX данных (данные от реальных пользователей).
         """
-        google_client = self._initialize_google_client(False)
+        google_client = self._initialize_google_client("crux")
         base_url = base_url or get_base_url()
         route_keys = route_keys or self._get_routes_from_config()
         routes = prepare_routes(route_keys, base_url=base_url)
@@ -200,7 +203,7 @@ class SpeedtestService:
                 json.dump(crux_data, f, ensure_ascii=False, indent=2)
 
             print(f"[INFO]: CrUX сохранен: {crux_file}")
-            process_crux_results(crux_file, route_key, device_type, google_client, self.worksheet_name)
+            process_crux_results(crux_file, route_key, device_type, google_client)
 
 
 if __name__ == "__main__":
@@ -210,6 +213,6 @@ if __name__ == "__main__":
 
     service = SpeedtestService()
     # Пример вызовов:
-    service.run_local_tests(["home"], device, iteration_count)
+    # service.run_local_tests(["home"], device, iteration_count)
     # service.run_api_aggregated_tests(["home"], device, iteration_count)
-    # service.run_crux_data_collection(["home"], device)
+    service.run_crux_data_collection(["home"], device)

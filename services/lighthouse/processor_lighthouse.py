@@ -1,294 +1,157 @@
 """
 Модуль для обработки результатов тестов скорости Lighthouse.
-Отвечает за:
-    - Парсинг JSON-файлов
-    - Агрегацию метрик
-    - Сохранение результатов в CSV
-    - Запись результатов в Google Sheets
+- Парсинг JSON-файлов
+- Агрегация метрик
+- Запись результатов в Google Sheets
 """
 
 import json
-import os
-import csv
 from datetime import datetime
-from typing import List
+from typing import List, Dict, Any, Optional
 import numpy as np
 
-from services.lighthouse.configs.config_lighthouse import REPORTS_DIR, get_current_environment, get_full_url, \
-    get_worksheet_name, cleanup_temp_files, TEMP_REPORTS_DIR
+from services.lighthouse.configs.config_lighthouse import (
+    TEMP_REPORTS_DIR,
+    get_current_environment,
+    get_full_url,
+    resolve_worksheet_name,
+    cleanup_temp_files,
+)
+from services.google.google_sheets_client import GoogleSheetsClient
 
 
-def parse_lighthouse_results(json_file: str, include_extended_metrics: bool = False) -> dict | None:
-    """
-    Парсит JSON-отчет Lighthouse и извлекает ключевые метрики.
-    Возвращает None при ошибке.
-    :param json_file: Путь к JSON-файлу отчета Lighthouse.
-    :param include_extended_metrics: Флаг для включения расширенных метрик.
-    :return: Словарь с ключевыми метриками.
-    """
+def parse_lighthouse_results(json_file: str) -> Optional[dict]:
     try:
         with open(json_file, "r", encoding="utf-8") as file:
             data = json.load(file)
 
-        # Базовые метрики
-        result = {
-            "performance": data["categories"]["performance"]["score"] * 100,
-            "lcp": data["audits"]["largest-contentful-paint"]["numericValue"],
-            "fcp": data["audits"]["first-contentful-paint"]["numericValue"],
-            "tbt": data["audits"]["total-blocking-time"]["numericValue"],
-            "cls": data["audits"]["cumulative-layout-shift"]["numericValue"],
-            "si": data["audits"]["speed-index"]["numericValue"],
-            "tti": data["audits"]["interactive"]["numericValue"]
-        }
-
-        # Расширенные метрики (если включены)
-        if include_extended_metrics:
-            result.update({
-                "fmp": data["audits"].get("first-meaningful-paint", {}).get("numericValue", 0),
-                "estimated_input_latency": data["audits"].get("estimated-input-latency", {}).get("numericValue", 0),
-                "server_response_time": data["audits"].get("server-response-time", {}).get("numericValue", 0),
-                "resource_sizes": {
-                    "js": data["audits"].get("resource-summary", {}).get("details", {}).get("items", [{}])[0].get("size", 0),
-                    "css": data["audits"].get("resource-summary", {}).get("details", {}).get("items", [{}])[1].get("size", 0),
-                    "images": data["audits"].get("resource-summary", {}).get("details", {}).get("items", [{}])[2].get("size", 0)
-                },
-                "http_requests": data["audits"].get("network-requests", {}).get("details", {}).get("items", []),
-                "blocking_resources": data["audits"].get("render-blocking-resources", {}).get("details", {}).get("items", []),
-                "time_spent": {
-                    "parsing": data["audits"].get("mainthread-work-breakdown", {}).get("details", {}).get("items", [{}])[0].get("duration", 0),
-                    "scripting": data["audits"].get("mainthread-work-breakdown", {}).get("details", {}).get("items", [{}])[1].get("duration", 0),
-                    "rendering": data["audits"].get("mainthread-work-breakdown", {}).get("details", {}).get("items", [{}])[2].get("duration", 0)
-                },
-                "categories": {
-                    "seo": data["categories"]["seo"]["score"] * 100,
-                    "best_practices": data["categories"]["best-practices"]["score"] * 100,
-                    "accessibility": data["categories"]["accessibility"]["score"] * 100,
-                    "pwa": data["categories"]["pwa"]["score"] * 100
-                }
-            })
-
-        return result
-    except Exception as e:
-        print(f"[!] Ошибка при разборе файла {json_file}: {e}")
-        return None
-
-
-def parse_crux_results(json_file: str) -> dict | None:
-    """
-    Парсит JSON-отчет CrUX и извлекает ключевые метрики.
-    Возвращает None при ошибке.
-    :param json_file: Путь к JSON-файлу отчета CrUX.
-    :return: Словарь с ключевыми метриками.
-    """
-    try:
-        with open(json_file, "r", encoding="utf-8") as file:
-            data = json.load(file)
-
-        # Извлекаем метрики из CrUX данных
-        metrics = data.get("loadingExperience", {}).get("metrics", {})
         return {
-            "LCP": metrics.get("LARGEST_CONTENTFUL_PAINT_MS", {}).get("percentile", 0),
-            "FID": metrics.get("FIRST_INPUT_DELAY_MS", {}).get("percentile", 0),
-            "CLS": metrics.get("CUMULATIVE_LAYOUT_SHIFT_SCORE", {}).get("percentile", 0),
-            "FCP": metrics.get("FIRST_CONTENTFUL_PAINT_MS", {}).get("percentile", 0),
-            "TTFB": metrics.get("TIME_TO_FIRST_BYTE", {}).get("percentile", 0)
+            "P": data["categories"]["performance"]["score"] * 100,
+            "LCP": data["audits"]["largest-contentful-paint"]["numericValue"],
+            "FCP": data["audits"]["first-contentful-paint"]["numericValue"],
+            "TBT": data["audits"]["total-blocking-time"]["numericValue"],
+            "CLS": data["audits"]["cumulative-layout-shift"]["numericValue"],
+            "SI": data["audits"]["speed-index"]["numericValue"],
+            "TTI": data["audits"]["interactive"]["numericValue"],
+            "TTFB": data["audits"]["server-response-time"]["numericValue"],
+            "INP": data.get("audits", {}).get("experimental-interaction-to-next-paint", {}).get("numericValue", 0),
         }
     except Exception as e:
         print(f"[!] Ошибка при разборе файла {json_file}: {e}")
         return None
 
 
-def aggregate_results(results: list) -> dict:
-    """
-    Агрегирует результаты: min, max, среднее и 90-й процентиль.
-    :param results: Список словарей с результатами тестов.
-    :return: Словарь с агрегированными результатами.
-    """
-    results = [r for r in results if r is not None]
-    if not results:
+def parse_crux_results(json_file: str) -> Optional[Dict[str, Any]]:
+    try:
+        with open(json_file, "r", encoding="utf-8") as file:
+            data = json.load(file)
+
+        metrics = data.get("metrics", {}) or data.get("loadingExperience", {}).get("metrics", {})
+
+        return {
+            "LCP_p75": metrics.get("LARGEST_CONTENTFUL_PAINT_MS", {}).get("percentile", 0),
+            "FCP_p75": metrics.get("FIRST_CONTENTFUL_PAINT_MS", {}).get("percentile", 0),
+            "INP_p75": metrics.get("INTERACTION_TO_NEXT_PAINT", {}).get("percentile", 0),
+            "CLS_p75": metrics.get("CUMULATIVE_LAYOUT_SHIFT_SCORE", {}).get("percentile", 0),
+            "LCP_good_pct": round(metrics.get("LARGEST_CONTENTFUL_PAINT_MS", {}).get("distributions", [{}])[0].get("proportion", 0) * 100, 2),
+            "FCP_good_pct": round(metrics.get("FIRST_CONTENTFUL_PAINT_MS", {}).get("distributions", [{}])[0].get("proportion", 0) * 100, 2),
+            "INP_good_pct": round(metrics.get("INTERACTION_TO_NEXT_PAINT", {}).get("distributions", [{}])[0].get("proportion", 0) * 100, 2),
+            "CLS_good_pct": round(metrics.get("CUMULATIVE_LAYOUT_SHIFT_SCORE", {}).get("distributions", [{}])[0].get("proportion", 0) * 100, 2),
+            "TTFB": metrics.get("EXPERIMENTAL_TIME_TO_FIRST_BYTE", {}).get("percentile", 0)
+        }
+    except Exception as e:
+        print(f"[!] Ошибка при разборе файла {json_file}: {e}")
+        return None
+
+
+def aggregate_results(results: List[Optional[Dict[str, Any]]]) -> Dict[str, Dict[str, float]]:
+    valid_results = [r for r in results if r is not None]
+    if not valid_results:
         raise ValueError("[!] Нет валидных результатов для агрегации.")
 
-
     aggregated = {}
-    for metric in results[0].keys():
-        values = [res[metric] for res in results]
+    for metric in valid_results[0].keys():
+        values = [res[metric] for res in valid_results if metric in res]
         aggregated[metric] = {
             "min": round(np.min(values), 2),
             "max": round(np.max(values), 2),
-            "mean": round(np.mean(values), 2),
+            "avg": round(np.mean(values), 2),
             "p90": round(np.percentile(values, 90), 2)
         }
     return aggregated
 
 
-def save_aggregated_results_to_csv(aggregated: dict, route_key: str, is_local: bool = True) -> str:
-    """
-    Сохраняет агрегированные результаты в CSV-файл.
-    :param aggregated: Словарь с агрегированными метриками.
-    :param route_key: Ключ роута.
-    :param is_local: Флаг, указывающий на локальный запуск.
-    """
-    date_time = datetime.now().strftime("%Y%m%d_%H%M")
-    mode = "local" if is_local else "api"
-    output_csv = REPORTS_DIR / f"aggregated_{mode}_results_{date_time}_{route_key}.csv"
-    os.makedirs(REPORTS_DIR, exist_ok=True)
-
-    with open(output_csv, "w", newline="", encoding="utf-8") as file:
-        fieldnames = ["metric", "min", "max", "mean", "p90"]
-        writer = csv.DictWriter(file, fieldnames=fieldnames)
-        writer.writeheader()
-        for metric, values in aggregated.items():
-            writer.writerow({"metric": metric, **values})
-
-    print(f"[✔] Сохранено: {output_csv}")
-    return str(output_csv)
+def flatten_aggregated_metrics(aggregated: Dict[str, Dict[str, float]]) -> Dict[str, float]:
+    return {f"{metric}_{stat}": value for metric, stats in aggregated.items() for stat, value in stats.items()}
 
 
-def process_crux_results(crux_data: str, route_key: str,
-                         device: str, gsheet_client,
-                         worksheet_name: str):
-    """
-    Обрабатывает CrUX данные и отправляет их в Google Sheets.
-    :param worksheet_name:
-    :param crux_data:  с данными от API CrUX.
-    :param route_key: Ключ роута.
-    :param device: Тип устройства ("desktop" или "mobile").
-    :param gsheet_client: Клиент для работы с Google Sheets.
-    """
-    # Парсим CrUX данные
-    crux_metrics = parse_crux_results(crux_data)
-    if not crux_metrics:
-        print(f"[!] Нет данных для роута {route_key}.")
-        return
-
-    # Формируем строку для Google Sheets
-    timestamp = datetime.now().strftime("%Y.%m.%d %H:%M:%S")
+def build_row(timestamp: str, project_code: str, full_url: str, route_key: str,
+              device_type: str, aggregated: Dict[str, Dict[str, float]]) -> Dict[str, Any]:
     row = {
-        "timestamp": timestamp,
-        "route_key": route_key,
-        "device": device,
-        **crux_metrics
+        "Date": timestamp,
+        "Sprint": "",
+        "Env": project_code,
+        "Route": GoogleSheetsClient.prepare_link(route_key, full_url),
+        "Device": device_type,
     }
-
-    # Отправляем данные в Google Sheets
-    if gsheet_client:
-        print(f"[DEBUG] Запись CrUX данных в Google Sheets для роута: {route_key}")
-        gsheet_client.append_result(row)
-        print(f"[✔] CrUX данные успешно загружены в Google Sheets {worksheet_name}")
-
-
-def process_and_save_results(json_paths: List[str], route_key: str,
-                             device_type: str,
-                             gsheet_client, is_local: bool = True,
-                             keep_temp_files: bool = False):
-    """
-    Обрабатывает список JSON-файлов: парсинг, агрегация, сохранение в CSV и запись в Google Sheets.
-    :param json_paths: Список путей к JSON-файлам.
-    :param route_key: Ключ роута.
-    :param device_type: Тип устройства (desktop или mobile).
-    :param gsheet_client: Клиент для работы с Google Sheets.
-    :param is_local: Флаг, указывающий на локальный запуск.
-    """
-
-    temp_dir = TEMP_REPORTS_DIR
-    # Парсинг JSON-файлов
-    print(f"[DEBUG] Начало обработки JSON-файлов для роута: {route_key}")
-    parsed_results = [parse_lighthouse_results(path) for path in json_paths]
-
-    # Агрегация результатов
-    print(f"[DEBUG] Агрегация результатов для роута: {route_key}")
-    aggregated_results = aggregate_results(parsed_results)
-
-    # Сохранение в CSV
-    print(f"[DEBUG] Сохранение результатов в CSV для роута: {route_key}")
-    csv_file_path = save_aggregated_results_to_csv(aggregated_results, route_key, is_local)
-    # Очистка временных файлов
-    if temp_dir and os.path.exists(csv_file_path):
-        print(f"[DEBUG] Удаление временных результатов для роута: {route_key}")
-        cleanup_temp_files(temp_dir)
-    else:
-        print(f"[INFO] Временные файлы сохранены для роута: {route_key} (keep_temp_files={keep_temp_files})")
-
-    # Запись в Google Sheets
-    if gsheet_client:
-        environment = get_current_environment()
-        worksheet_name = get_worksheet_name(environment, is_local)
-        gsheet_client.worksheet_name = worksheet_name  # Устанавливаем имя листа
-
-        contour = environment
-        full_url = get_full_url(route_key)
-        timestamp = datetime.now().strftime("%Y.%m.%d %H:%M:%S")
-        row = build_row(timestamp, "ProjectName", full_url, route_key, device_type, contour, aggregated_results)
-
-        print(f"[DEBUG] Запись результатов в Google Sheets для роута: {route_key}")
-        gsheet_client.append_result(row)
-        print("[✔] Данные успешно загружены в Google Sheets")
-
-
-def build_row(timestamp: str, project: str,
-              full_url: str, route_key: str,
-              device_type: str, contour: str,
-              aggregated: dict) -> dict:
-    """
-    Формирует строку для записи в Google Sheets с чётким порядком полей.
-    """
-    flat = flatten_aggregated_metrics(aggregated)
-
-    row = {
-        "timestamp": timestamp,
-        "project": project,
-        "url": build_route_link(full_url, route_key),
-        "device_type": device_type,
-        "contour": contour,
-    }
-
-    # Добавляем строго в нужном порядке метрики
-    metrics_order = [
-        "performance", "lcp", "fcp", "tbt", "cls", "si", "tti"
-    ]
-    stats_order = ["min", "max", "mean", "p90"]
-
-    for metric in metrics_order:
-        for stat in stats_order:
-            key = f"{metric}_{stat}"
-            row[key] = flat.get(key, "")
-
+    row.update(flatten_aggregated_metrics(aggregated))
     return row
 
 
-def flatten_aggregated_metrics(aggregated: dict) -> dict:
-    """
-    Преобразует вложенные метрики в плоский словарь.
-    :param aggregated: Словарь с агрегированными метриками.
-    :return: Плоский словарь.
-    """
-    flat = {}
-    for metric, values in aggregated.items():
-        for key, value in values.items():
-            flat[f"{metric}_{key}"] = value
-    return flat
+def process_and_save_results(json_paths: List[str], route_key: str, device_type: str,
+                             gsheet_client: GoogleSheetsClient,
+                             is_local: bool = True,
+                             keep_temp_files: bool = False):
+    parsed_results = [parse_lighthouse_results(p) for p in json_paths]
+    if not parsed_results or all(res is None for res in parsed_results):
+        print(f"[WARNING!] Нет валидных данных для роута {route_key}.")
+        return
+    aggregated = aggregate_results(parsed_results)
 
-def build_route_link(full_url: str, route_key: str) -> str:
-    """
-    Формирует гиперссылку для Google Sheets.
-    :param full_url: Полный URL роута.
-    :param route_key: Ключ роута.
-    :return: Гиперссылка в формате Google Sheets.
-    """
-    return f'=HYPERLINK("{full_url}", "{route_key}")'
+    if not keep_temp_files:
+        cleanup_temp_files(TEMP_REPORTS_DIR)
+
+    environment = get_current_environment()
+    source_type = "cli" if is_local else "api"
+    worksheet_name = resolve_worksheet_name(environment, source=source_type)
+    template_name = "_CLI_Template" if source_type == "cli" else "_API_Template"
+
+    gsheet_client.worksheet_name = worksheet_name
+    gsheet_client.ensure_sheet_exists(sheet_name=worksheet_name, source=source_type)
+
+    timestamp = datetime.now().strftime("%Y.%m.%d %H:%M:%S")
+    row = build_row(
+        timestamp=timestamp,
+        project_code=f"VRS-{environment}",
+        full_url=get_full_url(route_key),
+        route_key=route_key,
+        device_type=device_type,
+        aggregated=aggregated
+    )
+    gsheet_client.append_result(row)
 
 
-def ensure_sheet_exists(client, spreadsheet_id: str, sheet_name: str, template_name: str):
-    """
-    Проверяет существование листа в Google Sheets. Если лист отсутствует, создаёт его на основе шаблона.
-    :param client: Экземпляр клиента Google Sheets.
-    :param spreadsheet_id: ID таблицы Google Sheets.
-    :param sheet_name: Имя листа, который нужно проверить или создать.
-    :param template_name: Имя шаблона для создания нового листа.
-    """
-    existing_sheets = client.get_all_sheets(spreadsheet_id)
-    if sheet_name not in existing_sheets:
-        print(f"[INFO] Лист '{sheet_name}' отсутствует. Создаём на основе шаблона '{template_name}'.")
-        client.duplicate_sheet(spreadsheet_id, template_name, sheet_name)
-    else:
-        print(f"[DEBUG] Лист '{sheet_name}' уже существует.")
+def process_crux_results(crux_file: str, route_key: str, device: str,
+                         gsheet_client: GoogleSheetsClient):
+    crux_metrics = parse_crux_results(crux_file)
+    if not crux_metrics:
+        print(f"[WARNING!] Нет данных для роута {route_key}.")
+        return
+
+    source_type = "crux"
+    environment = get_current_environment()
+    worksheet_name = resolve_worksheet_name(environment, source=source_type)
+    gsheet_client.worksheet_name = worksheet_name
+    gsheet_client.ensure_sheet_exists(sheet_name=worksheet_name, source=source_type)
+
+    timestamp = datetime.now().strftime("%Y.%m.%d %H:%M:%S")
+    row = {
+        "Date": timestamp,
+        "Sprint": "",
+        "Env": f"VRS-{environment}",
+        "Route": GoogleSheetsClient.prepare_link(route_key, get_full_url(route_key)),
+        "Device": device,
+        **crux_metrics
+        # ToDo: нужно Добавить обработку других метрик!!!!!!!!!!
+    }
+    gsheet_client.append_result(row)
