@@ -158,4 +158,4 @@ class GoogleSheetsClient:
         """
         Генерирует формулу HYPERLINK для вставки в ячейку.
         """
-        return f'=HYPERLINK("{url}", "{anchor}")'
+        return f'=HYPERLINK("{url}"; "{anchor}")'
