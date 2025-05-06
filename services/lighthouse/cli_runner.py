@@ -10,13 +10,45 @@ import json
 import os
 import shutil
 import subprocess
+import platform
 from datetime import datetime
 
 from services.lighthouse.configs.config_lighthouse import get_temp_dir_for_route
 from services.lighthouse.processor_lighthouse import parse_lighthouse_results
 
-# 📌 Ищем путь к установленному Lighthouse CLI
-LIGHTHOUSE_CMD = shutil.which("lighthouse")
+def find_lighthouse_cmd():
+    """
+    Ищет Lighthouse CLI в PATH или стандартных директориях npm для всех ОС.
+    """
+    # Проверяем наличие в PATH
+    cmd = shutil.which("lighthouse")
+    if cmd:
+        return cmd
+
+    # Проверяем стандартные пути для глобальных установок npm
+    possible_paths = []
+
+    if platform.system() == "Windows":
+        possible_paths.extend([
+            os.path.expanduser("~/AppData/Roaming/npm/lighthouse.cmd"),
+            "C:\\Program Files\\nodejs\\lighthouse.cmd",
+        ])
+    else:  # Для Linux и macOS
+        possible_paths.extend([
+            os.path.expanduser("~/.nvm/versions/node/v22.15.0/bin/lighthouse"),
+            os.path.expanduser("~/.npm-global/bin/lighthouse"),
+            "/usr/local/bin/lighthouse",
+            "/usr/bin/lighthouse",
+        ])
+
+    for path in possible_paths:
+        if os.path.exists(path) and os.access(path, os.X_OK):
+            return path
+
+    return None
+
+# Используем функцию для определения LIGHTHOUSE_CMD
+LIGHTHOUSE_CMD = find_lighthouse_cmd()
 _lighthouse_checked = False  # Флаг, чтобы проверять окружение только один раз
 CONFIG_DIR = os.path.join(os.path.dirname(__file__), "configs")
 
@@ -41,6 +73,7 @@ def check_lighthouse_environment():
     except subprocess.CalledProcessError as e:
         raise RuntimeError(f"[ERROR] Ошибка при проверке Lighthouse: {e.stderr}")
 
+    print(f"[DEBUG] PATH в Python: {os.environ['PATH']}")
     _lighthouse_checked = True
 
 

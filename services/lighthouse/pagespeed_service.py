@@ -143,6 +143,8 @@ class SpeedtestService:
             json_paths = run_local_lighthouse(route_key, route_url, n_iteration, device_type)
             process_and_save_results(json_paths, route_key, device_type, google_client, is_local=True, keep_temp_files=keep_temp_files)
 
+        google_client.flush()
+
     def run_api_aggregated_tests(self, route_keys: Optional[List[str]], device_type: str,
                                  n_iteration: int = 10, keep_temp_files: bool = False,
                                  base_url: Optional[str] = None):
@@ -205,6 +207,8 @@ class SpeedtestService:
             print(f"[INFO]: CrUX сохранен: {crux_file}")
             process_crux_results(crux_file, route_key, device_type, google_client)
 
+        google_client.flush()
+
 
 if __name__ == "__main__":
     base_url = get_base_url()
@@ -213,6 +217,6 @@ if __name__ == "__main__":
 
     service = SpeedtestService()
     # Пример вызовов:
-    # service.run_local_tests(["home"], device, iteration_count)
+    service.run_local_tests(["home"], device, iteration_count)
     # service.run_api_aggregated_tests(["home"], device, iteration_count)
-    service.run_crux_data_collection(["home"], device)
+    # service.run_crux_data_collection(["home"], device)

@@ -11,13 +11,13 @@ def service():
 @pytest.mark.parametrize("device", ["desktop", "mobile"])
 def test_run_cli(service, device):
     """Lighthouse CLI: локальный запуск."""
-    service.run_local_tests(ROUTES, device, n_iteration=1)
+    service.run_local_tests(ROUTES, device, n_iteration=10)
 
 @pytest.mark.performance
 @pytest.mark.parametrize("device", ["desktop", "mobile"])
 def test_run_api(service, device):
     """Lighthouse API: запуск через Google API."""
-    service.run_api_aggregated_tests(ROUTES, device, n_iteration=1)
+    service.run_api_aggregated_tests(ROUTES, device, n_iteration=10)
 
 @pytest.mark.performance
 @pytest.mark.parametrize("device", ["desktop", "mobile"])

@@ -28,8 +28,12 @@ class GoogleSheetsClient:
         self.spreadsheet = self.client.open_by_key(self.spreadsheet_id)
         self.sheet = self._open_or_create_sheet(worksheet_name)
         self._batch_rows: List[List[Any]] = []
+        self._headers: Optional[List[str]] = None  # Сохраняем порядок заголовков
 
     def _authorize(self):
+        """
+        Авторизация через сервисный аккаунт.
+        """
         scopes = ["https://www.googleapis.com/auth/spreadsheets"]
         credentials = Credentials.from_service_account_file(
             self.credentials_path,
@@ -38,6 +42,9 @@ class GoogleSheetsClient:
         return gspread.authorize(credentials)
 
     def _open_or_create_sheet(self, sheet_name: str):
+        """
+        Пытается открыть существующий лист, иначе создаёт новый.
+        """
         try:
             return self.spreadsheet.worksheet(sheet_name)
         except WorksheetNotFound:
@@ -48,20 +55,22 @@ class GoogleSheetsClient:
         """
         Добавляет строку (в память) для последующей batch-записи.
         Автоматически дополняет заголовки, если появляются новые ключи.
+
+        :param data: Словарь с данными для строки.
+        :param raw_formula_fields: Не используется в текущей реализации, можно использовать для вставки формул.
         """
         headers = self._get_or_create_headers(data)
+        self._headers = headers  # Зафиксировать порядок заголовков
         processed_data = self._normalize_data(data)
 
-        row = []
-        for h in headers:
-            val = processed_data.get(h, "")
-            row.append(val)
-
+        # Формируем строку в соответствии с заголовками
+        row = [processed_data.get(h, "") for h in headers]
         self._batch_rows.append(row)
 
     def flush(self):
         """
         Отправляет накопленные строки в Google Sheets одним вызовом.
+        Начинает со строки A4 или следующей пустой после уже записанных строк.
         """
         if not self._batch_rows:
             print("[DEBUG] Нет строк для отправки.")
@@ -69,8 +78,18 @@ class GoogleSheetsClient:
 
         try:
             print(f"[INFO] Запись {len(self._batch_rows)} строк в таблицу '{self.worksheet_name}'...")
-            self.sheet.append_rows(self._batch_rows, value_input_option="USER_ENTERED")
+
+            existing_data = self.sheet.get_all_values()
+            start_row = max(4, len(existing_data) + 1)  # Не раньше A4
+            max_len = len(self._headers or [])
+
+            padded_rows = [r + [""] * (max_len - len(r)) for r in self._batch_rows]
+            range_start = f"A{start_row}"
+
+            self.sheet.update(range_start, padded_rows, value_input_option="USER_ENTERED")
             self._batch_rows.clear()
+
+            print(f"[INFO] Успешно записано с {range_start} ({len(padded_rows)} строк).")
         except Exception as e:
             print(f"[ERROR] Не удалось выполнить batch-запись: {e}")
             raise
@@ -78,6 +97,9 @@ class GoogleSheetsClient:
     def append_result_to_sheet(self, sheet_name: str, row: Dict[str, Any]):
         """
         Добавляет строку напрямую в указанный лист.
+
+        :param sheet_name: Название листа.
+        :param row: Данные строки.
         """
         try:
             target_sheet = self.spreadsheet.worksheet(sheet_name)
@@ -87,10 +109,10 @@ class GoogleSheetsClient:
             print(f"[ERROR] Ошибка при добавлении строки в '{sheet_name}': {e}")
             raise
 
-
     def ensure_sheet_exists(self, sheet_name: str, source: Literal["cli", "api", "crux"]):
         """
         Проверяет наличие листа. Если отсутствует — клонирует из шаблона по типу источника.
+
         :param sheet_name: Имя создаваемого листа.
         :param source: Тип источника — определяет, из какого шаблона клонировать ('cli', 'api', 'crux').
         """
@@ -98,7 +120,7 @@ class GoogleSheetsClient:
             spreadsheet = self.client.open_by_key(self.spreadsheet_id)
             sheet_titles = [ws.title for ws in spreadsheet.worksheets()]
             if sheet_name not in sheet_titles:
-                from services.lighthouse.configs.config_lighthouse import TEMPLATE_SHEETS  # 👈 оттуда берём шаблон
+                from services.lighthouse.configs.config_lighthouse import TEMPLATE_SHEETS
                 template_name = TEMPLATE_SHEETS.get(source.lower())
                 if not template_name:
                     raise ValueError(f"Неизвестный шаблон для source={source}")
@@ -125,12 +147,10 @@ class GoogleSheetsClient:
             current_headers = []
 
         if not current_headers:
-            # Первая запись — заголовки по ключам из data
             headers = list(data.keys())
             self.sheet.insert_row(headers, index=1)
             return headers
 
-        # Проверка на новые поля, которых ещё нет в таблице
         missing_headers = [key for key in data.keys() if key not in current_headers]
         if missing_headers:
             updated_headers = current_headers + missing_headers
@@ -157,5 +177,9 @@ class GoogleSheetsClient:
     def prepare_link(anchor: str, url: str) -> str:
         """
         Генерирует формулу HYPERLINK для вставки в ячейку.
+
+        :param anchor: Текст ссылки.
+        :param url: URL-адрес.
+        :return: Строка с формулой Google Sheets для гиперссылки.
         """
         return f'=HYPERLINK("{url}"; "{anchor}")'
