@@ -1,97 +1,137 @@
 
-# 📈 Lighthouse Automation Service
-> Универсальный сервис для автоматизированного тестирования производительности, доступности, лучших практик и SEO веб-страниц через Lighthouse CLI, Google PageSpeed API и Chrome UX Report (CrUX).
+# Lighthouse Automation Service
 
-## 📌 Основные возможности
-Поддержка трёх типов тестов:
-- 🚀 CLI запуск: Локальный запуск Lighthouse с параметризацией устройства и сетевых условий, агрегация N итераций.
-- 🌐 API запуск: Запуск через Google PageSpeed API с Core Web Vitals, агрегация базовых метрик.
-- 📊 CrUX сбор данных: Сбор реальных пользовательских метрик за последние 28 дней из Chrome UX Report (CrUX API).
+Сервис для автоматизированного тестирования производительности веб-страниц через Lighthouse CLI и сбора CrUX-метрик.
 
-Гибкая параметризация:
-- Количество итераций
-- Выбор роутов для тестирования
-- Тип устройства (desktop / mobile)
-- Эмуляция экрана, сети и user-agent для CLI запусков
-- Выбор категорий Lighthouse: Performance, Accessibility, Best Practices, SEO
-- Поддержка режимов: Navigation, Snapshot, Timespan
+## Быстрый старт
 
-- Интеграция с Google Sheets:
-- Автоматическая запись результатов на листы по шаблонам.
-- Поддержка создания листа по шаблону, если его нет.
-- Пакетная отправка данных для оптимизации скорости загрузки.
+### 1. Выбрать контур
 
-Автономность и расширяемость:
-- Может работать как самостоятельный сервис или как часть тестового фреймворка.
-- Конфигурируется через .env, .ini и .json файлы.
-- Готовность к параметризации через Pytest для масштабирования проверок.
-
-Готовность к расширению:
-- Возможность добавления новых типов устройств, роутов, режимов тестирования.
-- Планируемое расширение на YAML-конфигурации и поддержку flow-проверок.
-
-### 🗂️ Структура проекта
-```bash
-└──/services/lighthouse/
-│  │
-│  ├── configs/
-│  │   ├── config_lighthouse.py    # 📌 Чтение и управление настройками
-│  │   ├── base_urls.ini            # 📌 Окружения: DEV, TEST, STAGE, PROD
-│  │   ├── routes.ini               # 📌 Маршруты для тестирования
-│  │   ├── config_desktop.json      # 📌 Настройки эмуляции для desktop
-│  │   └── config_mobile.json       # 📌 Настройки эмуляции для mobile
-│  │
-│  ├── cli_runner.py                # 📌 Запуск и управление Lighthouse CLI
-│  ├── api_runner.py                # 📌 Взаимодействие с Google PageSpeed API
-│  ├── processor_lighthouse.py      # 📌 Обработка, агрегация и сохранение результатов
-│  ├── cleaner.py                   # 📌 Очистка временных файлов после тестов
-│  ├── speedtest_service.py         # 📌 Оркестратор запусков и интеграций
-│  │
-├── creds/                       # 📌 Файлы сервисных аккаунтов для доступа к Google API
-│  │
-├── /Reports/
-│  └── reports_lighthouse/
-│      ├── temp_lighthouse/         # 📂 Временные результаты тестов
-│      └── aggregated_reports/      # 📂 Финальные агрегированные отчеты
+В файле `URLs/base_urls.ini` указать нужный контур:
+```ini
+[environments]
+current = VRP_DEV
 ```
-    
-## ⚙️ Конфигурация
-| Файл                    | Назначение                                        |
-| ----------------------- | ------------------------------------------------- |
-| `config_lighthouse.env` | Переменные окружения (ключи API, пути к таблицам) |
-| `base_urls.ini`         | Перечень окружений и базовые URL                  |
-| `routes.ini`            | Маршруты страниц для тестирования                 |
-| `config_desktop.json`   | Параметры для эмуляции десктопа                   |
-| `config_mobile.json`    | Параметры для эмуляции мобилы                     |
 
+Доступные контуры:
+| Контур | URL |
+|--------|----|
+| `VRS_DEV` | https://dev.vrsmash.com |
+| `VRS_TEST` | https://test.vrsmash.com |
+| `VRS_STAGE` | https://stage.vrsmash.com |
+| `VRS_PROD` | https://www.vrsmash.com |
+| `VRP_DEV` | https://d.vrporn.com |
+| `VRP_TEST` | https://t.vrporn.com |
+| `VRP_STAGE` | https://sg.vrporn.com |
+| `VRP_PROD` | https://vrporn.com |
 
-### 🧩 Технические детали
-Централизованное управление директориями:
-- Папки для отчетов, временных файлов и отчётов CrUX создаются автоматически при запуске.
-- Управляется через config_lighthouse.py.
+### 2. Указать роуты
 
-Гарантированная корректная структура записи в Google Sheets:
-- Явный контроль заголовков.
-- Сохранение всех метрик в одном стиле: min, max, mean, p90.
+В файле `URLs/routes.ini`:
+```ini
+[routes]
+home = /
+login = /login
+```
 
-Пакетная отправка данных в таблицу:
-- Меньшее количество сетевых запросов к Google API.
-- Высокая скорость даже при большом количестве роутов и итераций.
+### 3. Запустить тест
 
+```python
+from dotenv import load_dotenv
+load_dotenv('services/lighthouse/configs/config_lighthouse.env', override=True)
 
-### 🛠️ Ближайшие планы по развитию
-- Перевести роуты и окружения на YAML вместо .ini для лучшей читаемости и расширяемости.
-- Добавить поддержку flow сценариев Lighthouse (проверка цепочек страниц).
-- Добавить прогон "по расписанию" для CrUX замеров (например, раз в 14 дней).
-- Улучшить механизм уведомлений об ошибках интеграций (Google API, Lighthouse CLI).
+import services.lighthouse.configs.config_lighthouse as cfg
+cfg.BASE_URL = None  # сброс кэша при смене контура
 
+from services.lighthouse.pagespeed_service import SpeedtestService
 
-## 📣 Контакты и участие
-Сервис активно развивается и будет полезен для QA-автоматизации тестирования сайтов, CI/CD пайплайнов и внутренних исследовательских задач.
+service = SpeedtestService()
 
-ToDo 
-- [ ] Актуализировать ReadMe в ИИ
-- [ ] Добавить описание по запуску и настройке
-- [ ] запускать с юзер аджент
-- [ ] добавить поддержку flow сценариев
-- [ ] Описание основных отчётов, шаблонов метрик
+# CLI: 10 прогонов, агрегация (min/max/avg/p90) -> Google Sheets
+service.run_local_tests(['home'], 'desktop', n_iteration=10)
+
+# CrUX: реальные пользовательские метрики (только PROD)
+service.run_crux_data_collection(['home'], 'desktop')
+```
+
+**Параметры `run_local_tests`:**
+| Параметр | Тип | По умолчанию | Описание |
+|----------|-----|-------------|----------|
+| `route_keys` | `list[str]` | все из routes.ini | Ключи роутов |
+| `device_type` | `str` | — | `"desktop"` или `"mobile"` |
+| `n_iteration` | `int` | `10` | Количество прогонов |
+| `keep_temp_files` | `bool` | `False` | Сохранять JSON-отчёты |
+| `base_url` | `str` | из конфига | Переопределить URL |
+
+## Структура проекта
+
+```
+services/lighthouse/
+  pagespeed_service.py       # Оркестратор запусков
+  cli_runner.py              # Запуск Lighthouse CLI
+  api_runner.py              # Google PageSpeed API
+  processor_lighthouse.py    # Парсинг, агрегация, запись в Sheets
+  configs/
+    config_lighthouse.py     # Пути, роуты, окружения
+    config_lighthouse.env    # API-ключи, ID таблицы, credentials
+    config_desktop.json      # Эмуляция desktop (1350x940)
+    config_mobile.json       # Эмуляция mobile (375x667)
+  creds/
+    *.json                   # Ключ сервисного аккаунта Google
+
+URLs/
+  base_urls.ini              # Контуры (проект + среда)
+  routes.ini                 # Роуты для тестирования
+
+Reports/reports_lighthouse/
+  temp_lighthouse/           # Временные JSON-отчёты (удаляются после агрегации)
+```
+
+## Google Sheets
+
+Результаты пишутся в Google Таблицу. Листы создаются автоматически.
+
+**Листы CLI** (по одному на контур):
+`VRS [DEV] CLI`, `VRS [TEST] CLI`, `VRS [STAGE] CLI`, `VRS [PROD] CLI`,
+`VRP [DEV] CLI`, `VRP [TEST] CLI`, `VRP [STAGE] CLI`, `VRP [PROD] CLI`
+
+**Лист CrUX**: `CrUX` (общий для обоих проектов)
+
+### Запись данных
+
+Данные пишутся **по имени заголовка**: скрипт читает заголовки из первой строки листа, находит нужный столбец по названию и записывает значение в соответствующую позицию. Порядок столбцов в таблице можно менять — запись не сломается.
+
+### Метрики CLI (агрегированные за N прогонов)
+
+Каждая метрика записывается в 4 столбца: `min`, `max`, `avg`, `p90`
+
+| Метрика | Описание | Good | Needs Improvement | Poor |
+|---------|----------|------|-------------------|------|
+| P | Performance score (0-100) | >= 90 | 50-89 | < 50 |
+| LCP | Largest Contentful Paint, мс | <= 2500 | 2500-4000 | > 4000 |
+| FCP | First Contentful Paint, мс | <= 1800 | 1800-3000 | > 3000 |
+| TBT | Total Blocking Time, мс | <= 200 | 200-600 | > 600 |
+| CLS | Cumulative Layout Shift | <= 0.1 | 0.1-0.25 | > 0.25 |
+| SI | Speed Index, мс | <= 3400 | 3400-5800 | > 5800 |
+| TTI | Time to Interactive, мс | <= 3800 | 3800-7300 | > 7300 |
+| TTFB | Time to First Byte, мс | <= 800 | 800-1800 | > 1800 |
+| INP | Interaction to Next Paint, мс | <= 200 | 200-500 | > 500 |
+
+## Настройка Google Sheets (с нуля)
+
+1. Создать Google Cloud проект, включить Google Sheets API
+2. Создать Service Account, скачать JSON-ключ
+3. Положить ключ в `services/lighthouse/creds/`
+4. Создать Google Таблицу, расшарить на email сервисного аккаунта (редактор)
+5. Вписать в `config_lighthouse.env`:
+   ```
+   GS_CREDS=services/lighthouse/creds/your-key.json
+   GS_SHEET_ID=ID_таблицы_из_URL
+   ```
+
+## Требования
+
+- Python 3.10+
+- Node.js + npm
+- Lighthouse CLI: `npm install -g lighthouse`
+- Python-пакеты: `gspread`, `google-auth`, `numpy`, `python-dotenv`, `requests`

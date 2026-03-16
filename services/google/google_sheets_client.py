@@ -109,12 +109,38 @@ class GoogleSheetsClient:
             print(f"[ERROR] Ошибка при добавлении строки в '{sheet_name}': {e}")
             raise
 
+    # Заголовки по умолчанию для каждого типа источника
+    DEFAULT_HEADERS = {
+        "cli": ["Date", "Sprint", "Env", "Route", "Device",
+                "P_min", "P_max", "P_avg", "P_p90",
+                "LCP_min", "LCP_max", "LCP_avg", "LCP_p90",
+                "FCP_min", "FCP_max", "FCP_avg", "FCP_p90",
+                "TBT_min", "TBT_max", "TBT_avg", "TBT_p90",
+                "CLS_min", "CLS_max", "CLS_avg", "CLS_p90",
+                "SI_min", "SI_max", "SI_avg", "SI_p90",
+                "TTI_min", "TTI_max", "TTI_avg", "TTI_p90",
+                "TTFB_min", "TTFB_max", "TTFB_avg", "TTFB_p90",
+                "INP_min", "INP_max", "INP_avg", "INP_p90"],
+        "api": ["Date", "Sprint", "Env", "Route", "Device",
+                "P_min", "P_max", "P_avg", "P_p90",
+                "LCP_min", "LCP_max", "LCP_avg", "LCP_p90",
+                "FCP_min", "FCP_max", "FCP_avg", "FCP_p90",
+                "TBT_min", "TBT_max", "TBT_avg", "TBT_p90",
+                "CLS_min", "CLS_max", "CLS_avg", "CLS_p90",
+                "SI_min", "SI_max", "SI_avg", "SI_p90",
+                "TTI_min", "TTI_max", "TTI_avg", "TTI_p90",
+                "TTFB_min", "TTFB_max", "TTFB_avg", "TTFB_p90",
+                "INP_min", "INP_max", "INP_avg", "INP_p90"],
+        "crux": ["Date", "Sprint", "Env", "Route", "Device",
+                 "LCP_p75", "FCP_p75", "INP_p75", "CLS_p75",
+                 "LCP_good_pct", "FCP_good_pct", "INP_good_pct", "CLS_good_pct",
+                 "TTFB"],
+    }
+
     def ensure_sheet_exists(self, sheet_name: str, source: Literal["cli", "api", "crux"]):
         """
-        Проверяет наличие листа. Если отсутствует — клонирует из шаблона по типу источника.
-
-        :param sheet_name: Имя создаваемого листа.
-        :param source: Тип источника — определяет, из какого шаблона клонировать ('cli', 'api', 'crux').
+        Проверяет наличие листа. Если отсутствует — создаёт новый с заголовками.
+        Если есть шаблон — клонирует из него, иначе создаёт с дефолтными заголовками.
         """
         try:
             spreadsheet = self.client.open_by_key(self.spreadsheet_id)
@@ -122,15 +148,25 @@ class GoogleSheetsClient:
             if sheet_name not in sheet_titles:
                 from services.lighthouse.configs.config_lighthouse import TEMPLATE_SHEETS
                 template_name = TEMPLATE_SHEETS.get(source.lower())
-                if not template_name:
-                    raise ValueError(f"Неизвестный шаблон для source={source}")
-                print(f"[INFO] Создаём лист '{sheet_name}' из шаблона '{template_name}'...")
-                template_sheet = spreadsheet.worksheet(template_name)
-                spreadsheet.duplicate_sheet(template_sheet.id, new_sheet_name=sheet_name)
+
+                # Пробуем клонировать из шаблона
+                if template_name and template_name in sheet_titles:
+                    print(f"[INFO] Создаём лист '{sheet_name}' из шаблона '{template_name}'...")
+                    template_sheet = spreadsheet.worksheet(template_name)
+                    spreadsheet.duplicate_sheet(template_sheet.id, new_sheet_name=sheet_name)
+                else:
+                    # Шаблона нет — создаём с заголовками
+                    print(f"[INFO] Создаём лист '{sheet_name}' с заголовками по умолчанию...")
+                    new_sheet = spreadsheet.add_worksheet(title=sheet_name, rows=100, cols=50)
+                    headers = self.DEFAULT_HEADERS.get(source.lower(), [])
+                    if headers:
+                        new_sheet.update('1:1', [headers])
+
+                self.sheet = spreadsheet.worksheet(sheet_name)
             else:
                 print(f"[DEBUG] Лист '{sheet_name}' уже существует.")
         except Exception as e:
-            print(f"[ERROR] Ошибка при создании листа из шаблона: {e}")
+            print(f"[ERROR] Ошибка при создании листа: {e}")
             raise
 
     def _get_or_create_headers(self, data: Dict[str, Any]) -> List[str]:

@@ -206,13 +206,15 @@ def run_local_lighthouse(
 
             result = subprocess.run(command, capture_output=True, text=True)
 
-            if result.returncode != 0:
-                print(f"[ERROR] Ошибка Lighthouse: {result.stderr}")
-                raise RuntimeError(f"Ошибка при запуске Lighthouse для {route_key}")
-
             if not os.path.exists(report_file):
+                if result.returncode != 0:
+                    print(f"[ERROR] Lighthouse завершился с ошибкой: {result.stderr}")
+                    raise RuntimeError(f"Ошибка при запуске Lighthouse для {route_key}")
                 print(f"[ERROR] Файл отчета не найден после итерации {iteration}: {report_file}")
                 continue
+
+            if result.returncode != 0:
+                print(f"[WARNING] Lighthouse завершился с ненулевым кодом, но отчёт создан. Продолжаем.")
 
             json_paths.append(report_file)
             parsed_results = parse_lighthouse_results(report_file)
