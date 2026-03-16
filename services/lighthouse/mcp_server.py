@@ -17,13 +17,15 @@ from typing import List, Optional
 # Корень проекта — три уровня вверх от этого файла
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, ROOT_DIR)
+# MCP stdio-процесс может стартовать из любой cwd — фиксируем на корень проекта
+os.chdir(ROOT_DIR)
 
 from dotenv import load_dotenv
 from mcp.server.fastmcp import FastMCP
 
-# Загружаем .env
-dotenv_path = os.path.join(os.path.dirname(__file__), "configs", "config_lighthouse.env")
-load_dotenv(dotenv_path)
+# Загружаем .env (абсолютный путь — не зависит от cwd)
+dotenv_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "configs", "config_lighthouse.env")
+load_dotenv(dotenv_path, override=True)
 
 import services.lighthouse.configs.config_lighthouse as cfg
 
