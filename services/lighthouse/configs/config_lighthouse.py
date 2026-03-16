@@ -26,7 +26,7 @@ TEMPLATE_SHEETS = {
     "crux": "_ChU_Template",
 }
 
-print("[INFO] Ищу конфиг по пути:", CONFIG_PATH)
+print("[INFO] Ищу конфиг по пути:", CONFIG_PATH, file=__import__('sys').stderr)
 if not os.path.exists(CONFIG_PATH):
     raise FileNotFoundError(f"[ERROR] Файл конфигурации не найден: {CONFIG_PATH}")
 

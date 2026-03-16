@@ -14,6 +14,11 @@ import shutil
 import sys
 from typing import List, Optional
 
+# MCP stdio: stdout зарезервирован для JSON-RPC.
+# Сохраняем оригинальный stdout для FastMCP, а print() → stderr.
+_real_stdout = sys.stdout
+sys.stdout = sys.stderr
+
 # Корень проекта — три уровня вверх от этого файла
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, ROOT_DIR)
@@ -28,8 +33,21 @@ dotenv_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "configs"
 load_dotenv(dotenv_path, override=True)
 
 import services.lighthouse.configs.config_lighthouse as cfg
+from contextlib import contextmanager
 
 CONFIG_PATH = cfg.CONFIG_PATH
+
+
+@contextmanager
+def _suppress_stdout():
+    """Перенаправляет stdout в stderr на время выполнения блока.
+    Защищает MCP JSON-RPC поток от print() внутри сервисного кода."""
+    old = sys.stdout
+    sys.stdout = sys.stderr
+    try:
+        yield
+    finally:
+        sys.stdout = old
 ROUTES_CONFIG_PATH = cfg.ROUTES_CONFIG_PATH
 
 mcp = FastMCP("lighthouse")
@@ -102,22 +120,23 @@ def run_lighthouse(
         iterations: Количество итераций (по умолчанию 10).
         environment: Контур (например "VRP_DEV"). Если не указан — используется текущий.
     """
-    from services.lighthouse.pagespeed_service import SpeedtestService
+    with _suppress_stdout():
+        from services.lighthouse.pagespeed_service import SpeedtestService
 
-    if environment:
-        base_url = _switch_environment(environment)
-        env_name = environment
-    else:
-        env_name = cfg.get_current_environment()
-        base_url = cfg.get_base_url()
+        if environment:
+            base_url = _switch_environment(environment)
+            env_name = environment
+        else:
+            env_name = cfg.get_current_environment()
+            base_url = cfg.get_base_url()
 
-    service = SpeedtestService(environment=env_name)
-    service.run_local_tests(
-        route_keys=routes,
-        device_type=device,
-        n_iteration=iterations,
-        base_url=base_url,
-    )
+        service = SpeedtestService(environment=env_name)
+        service.run_local_tests(
+            route_keys=routes,
+            device_type=device,
+            n_iteration=iterations,
+            base_url=base_url,
+        )
 
     return (
         f"Lighthouse CLI завершён.\n"
@@ -144,27 +163,28 @@ def run_crux(
         device: Тип устройства — "desktop" или "mobile".
         environment: Контур (рекомендуется *_PROD). Если не указан — текущий.
     """
-    from services.lighthouse.pagespeed_service import SpeedtestService
+    with _suppress_stdout():
+        from services.lighthouse.pagespeed_service import SpeedtestService
 
-    if environment:
-        base_url = _switch_environment(environment)
-        env_name = environment
-    else:
-        env_name = cfg.get_current_environment()
-        base_url = cfg.get_base_url()
+        if environment:
+            base_url = _switch_environment(environment)
+            env_name = environment
+        else:
+            env_name = cfg.get_current_environment()
+            base_url = cfg.get_base_url()
 
-    if "PROD" not in env_name.upper():
-        return (
-            f"Внимание: CrUX данные обычно доступны только для PROD-контуров. "
-            f"Текущий контур: {env_name}. Попробуйте VRS_PROD или VRP_PROD."
+        if "PROD" not in env_name.upper():
+            return (
+                f"Внимание: CrUX данные обычно доступны только для PROD-контуров. "
+                f"Текущий контур: {env_name}. Попробуйте VRS_PROD или VRP_PROD."
+            )
+
+        service = SpeedtestService(environment=env_name)
+        service.run_crux_data_collection(
+            route_keys=routes,
+            device_type=device,
+            base_url=base_url,
         )
-
-    service = SpeedtestService(environment=env_name)
-    service.run_crux_data_collection(
-        route_keys=routes,
-        device_type=device,
-        base_url=base_url,
-    )
 
     return (
         f"CrUX сбор завершён.\n"
@@ -210,37 +230,36 @@ def get_status() -> str:
 
     Возвращает статус каждого компонента.
     """
-    results = []
+    with _suppress_stdout():
+        results = []
 
-    # Проверка Lighthouse CLI
-    lighthouse_ok = shutil.which("lighthouse") is not None
-    results.append(
-        f"Lighthouse CLI: {'✓ установлен' if lighthouse_ok else '✗ не найден (npm i -g lighthouse)'}"
-    )
+        lighthouse_ok = shutil.which("lighthouse") is not None
+        results.append(
+            f"Lighthouse CLI: {'✓ установлен' if lighthouse_ok else '✗ не найден (npm i -g lighthouse)'}"
+        )
 
-    # Проверка Google Sheets credentials
-    try:
-        creds_path = cfg.get_google_creds_path()
-        results.append(f"Google Sheets credentials: ✓ {creds_path}")
-    except (ValueError, FileNotFoundError) as e:
-        results.append(f"Google Sheets credentials: ✗ {e}")
+        try:
+            creds_path = cfg.get_google_creds_path()
+            results.append(f"Google Sheets credentials: ✓ {creds_path}")
+        except (ValueError, FileNotFoundError) as e:
+            results.append(f"Google Sheets credentials: ✗ {e}")
 
-    # Проверка GS_SHEET_ID
-    sheet_id = os.getenv("GS_SHEET_ID")
-    results.append(
-        f"GS_SHEET_ID: {'✓ задан' if sheet_id else '✗ не задан'}"
-    )
+        sheet_id = os.getenv("GS_SHEET_ID")
+        results.append(
+            f"GS_SHEET_ID: {'✓ задан' if sheet_id else '✗ не задан'}"
+        )
 
-    # Текущий контур
-    try:
-        env = cfg.get_current_environment()
-        url = cfg.get_base_url()
-        results.append(f"Текущий контур: {env} ({url})")
-    except Exception as e:
-        results.append(f"Текущий контур: ✗ ошибка — {e}")
+        try:
+            env = cfg.get_current_environment()
+            url = cfg.get_base_url()
+            results.append(f"Текущий контур: {env} ({url})")
+        except Exception as e:
+            results.append(f"Текущий контур: ✗ ошибка — {e}")
 
     return "\n".join(results)
 
 
 if __name__ == "__main__":
+    # Возвращаем stdout для FastMCP (JSON-RPC транспорт)
+    sys.stdout = _real_stdout
     mcp.run()
