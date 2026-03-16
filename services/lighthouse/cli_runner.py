@@ -155,7 +155,9 @@ def run_local_lighthouse(
     config = load_device_config(device)
     if config:
         print(f"[INFO] Используется конфигурация для устройства: {device}")
-        preset = config.get("settings", {}).get("formFactor", "desktop")
+        form_factor = config.get("settings", {}).get("formFactor", "desktop")
+        # --preset принимает только "desktop", "perf", "experimental"; для mobile не передаём
+        preset = "desktop" if form_factor == "desktop" else None
         screen_emulation = config.get("settings", {}).get("screenEmulation", {})
         throttling = config.get("settings", {}).get("throttling", {})
         throttling_method = config.get("settings", {}).get("throttlingMethod", "simulate")
@@ -176,12 +178,14 @@ def run_local_lighthouse(
                 "--output=json",
                 f"--output-path={report_file}",
                 "--chrome-flags=--headless --no-sandbox",
-                f"--preset={preset}",
                 f"--emulated-form-factor={device}",
                 f"--throttling-method={throttling_method}",
                 f"--mode={mode}",
                 f"--only-categories={','.join(categories)}"
             ]
+
+            if preset:
+                command.append(f"--preset={preset}")
 
             # Параметры эмуляции экрана
             if screen_emulation:
