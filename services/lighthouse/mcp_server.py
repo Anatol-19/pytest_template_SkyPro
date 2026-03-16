@@ -109,7 +109,7 @@ def run_lighthouse(
         env_name = cfg.get_current_environment()
         base_url = cfg.get_base_url()
 
-    service = SpeedtestService()
+    service = SpeedtestService(environment=env_name)
     service.run_local_tests(
         route_keys=routes,
         device_type=device,
@@ -157,7 +157,7 @@ def run_crux(
             f"Текущий контур: {env_name}. Попробуйте VRS_PROD или VRP_PROD."
         )
 
-    service = SpeedtestService()
+    service = SpeedtestService(environment=env_name)
     service.run_crux_data_collection(
         route_keys=routes,
         device_type=device,

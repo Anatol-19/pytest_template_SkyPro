@@ -170,76 +170,57 @@ def build_row(timestamp: str, project_code: str, full_url: str, route_key: str,
     return row
 
 def process_and_save_results(json_paths: List[str], route_key: str, device_type: str,
-
                              gsheet_client: GoogleSheetsClient,
-
                              is_local: bool = True,
-
-                             keep_temp_files: bool = False):
+                             keep_temp_files: bool = False,
+                             environment: Optional[str] = None,
+                             full_url: Optional[str] = None):
 
     parsed_results = [parse_lighthouse_results(p) for p in json_paths]
 
     if not parsed_results or all(res is None for res in parsed_results):
-
         print(f"[WARNING!] Нет валидных данных для роута {route_key}.")
-
         return
 
     aggregated = aggregate_results(parsed_results)
 
     if not keep_temp_files:
-
         cleanup_temp_files(TEMP_REPORTS_DIR)
 
-    environment = get_current_environment()
+    environment = environment or get_current_environment()
+    resolved_url = full_url or get_full_url(route_key)
 
     source_type = "cli" if is_local else "api"
-
     worksheet_name = resolve_worksheet_name(environment, source=source_type)
 
-    template_name = "_CLI_Template" if source_type == "cli" else "_API_Template"
-
     gsheet_client.worksheet_name = worksheet_name
-
     gsheet_client.ensure_sheet_exists(sheet_name=worksheet_name, source=source_type)
 
     timestamp = datetime.now().strftime("%Y.%m.%d %H:%M:%S")
-
     row = build_row(
-
         timestamp=timestamp,
-
         project_code=_format_env_label(environment),
-
-        full_url=get_full_url(route_key),
-
+        full_url=resolved_url,
         route_key=route_key,
-
         device_type=device_type,
-
         aggregated=aggregated
-
     )
-
     gsheet_client.append_result(row)
 
 def process_crux_results(crux_file: str, route_key: str, device: str,
                          gsheet_client: GoogleSheetsClient,
                          full_url_override: str = None,
-                         route_label: str = None):
+                         route_label: str = None,
+                         environment: Optional[str] = None):
 
     crux_metrics = parse_crux_results(crux_file)
 
     if not crux_metrics:
-
         print(f"[WARNING!] Нет данных для роута {route_key}.")
-
         return
 
     source_type = "crux"
-
-    environment = get_current_environment()
-
+    environment = environment or get_current_environment()
     worksheet_name = resolve_worksheet_name(environment, source=source_type)
 
     gsheet_client.worksheet_name = worksheet_name

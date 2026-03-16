@@ -136,28 +136,25 @@ class SpeedtestService:
 
     iteration_counter = 0
 
-    def __init__(self, reports_dir=REPORTS_DIR, temp_reports_dir=TEMP_REPORTS_DIR):
+    def __init__(self, reports_dir=REPORTS_DIR, temp_reports_dir=TEMP_REPORTS_DIR,
+                 environment: Optional[str] = None):
+        """Инициализирует объект SpeedtestService.
 
-        """Инициализирует объект SpeedtestService."""
-
+        Args:
+            environment: Явно заданный контур. Если None — читается из base_urls.ini.
+                         Рекомендуется передавать явно при параллельных запусках.
+        """
         SpeedtestService.iteration_counter += 1
-
         self.iteration = SpeedtestService.iteration_counter
 
         self.base_reports_dir = reports_dir
-
         self.temp_reports_dir = temp_reports_dir
-
         ensure_directories_exist()
 
         self.config = load_routes_config()
-
         self.date = datetime.now().strftime("%d-%m-%y")
-
         self.dateTime = datetime.now().strftime("%d-%m-%y_%H-%M-%S")
-
-        self.environment = get_current_environment()
-
+        self.environment = environment or get_current_environment()
         self.worksheet_name: str
 
     def _initialize_google_client(self, source: Literal["cli", "api", "crux"]) -> GoogleSheetsClient:
@@ -237,7 +234,9 @@ class SpeedtestService:
                 continue
 
             json_paths = run_local_lighthouse(route_key, route_url, n_iteration, device_type)
-            process_and_save_results(json_paths, route_key, device_type, google_client, is_local=True, keep_temp_files=keep_temp_files)
+            process_and_save_results(json_paths, route_key, device_type, google_client,
+                                     is_local=True, keep_temp_files=keep_temp_files,
+                                     environment=self.environment, full_url=route_url)
 
         google_client.flush()
 
@@ -295,7 +294,9 @@ class SpeedtestService:
 
                 json_paths.append(json_path)
 
-            process_and_save_results(json_paths, route_key, device_type, google_client, is_local=False, keep_temp_files=keep_temp_files)
+            process_and_save_results(json_paths, route_key, device_type, google_client,
+                                     is_local=False, keep_temp_files=keep_temp_files,
+                                     environment=self.environment, full_url=route_url)
 
         google_client.flush()
 
@@ -328,7 +329,8 @@ class SpeedtestService:
                 device_type,
                 google_client,
                 full_url_override=route_url,
-                route_label=route_key
+                route_label=route_key,
+                environment=self.environment,
             )
 
             if include_origin:
@@ -350,7 +352,8 @@ class SpeedtestService:
                     device_type,
                     google_client,
                     full_url_override=origin_url,
-                    route_label=f"{route_key} (origin)"
+                    route_label=f"{route_key} (origin)",
+                    environment=self.environment,
                 )
 
         google_client.flush()
