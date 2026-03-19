@@ -11,6 +11,7 @@
 """
 
 import json
+from pathlib import Path
 
 from datetime import datetime
 
@@ -266,8 +267,16 @@ def process_and_save_results(json_paths: List[str], route_key: str, device_type:
     aggregated = aggregate_results(parsed_results)
 
     if not keep_temp_files:
-        # TODO: ограничить очистку только своим temp-каталогом, иначе параллельные запуски могут удалять чужие файлы
-        cleanup_temp_files(TEMP_REPORTS_DIR)
+        # Чистим только временные каталоги, созданные для текущего прогона,
+        # чтобы параллельные задания не удаляли чужие файлы.
+        temp_dirs = {Path(p).parent for p in json_paths}
+        for temp_dir in temp_dirs:
+            # Доп. защита: удаляем только подпапки внутри TEMP_REPORTS_DIR
+            try:
+                temp_dir.relative_to(TEMP_REPORTS_DIR)
+            except ValueError:
+                continue
+            cleanup_temp_files(temp_dir)
 
     environment = environment or get_current_environment()
     resolved_url = full_url or get_full_url(route_key)
