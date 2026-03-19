@@ -213,4 +213,4 @@ class GoogleSheetsClient:
         :param url: URL-адрес.
         :return: Строка с формулой Google Sheets для гиперссылки.
         """
-        return f'=HYPERLINK("{url}", "{anchor}")'
+        return f'=HYPERLINK("{url}"; "{anchor}")'

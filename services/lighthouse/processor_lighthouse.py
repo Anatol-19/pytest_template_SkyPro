@@ -327,7 +327,7 @@ def process_crux_results(crux_file: str, route_key: str, device: str,
     target_url = full_url_override or get_full_url(route_key)
     link_label = route_label or route_key
     row = {
-        "date": timestamp,
+        "date": timestamp.split()[0],
         "project": _format_env_label(environment),
         "sprint": "",
         "page": GoogleSheetsClient.prepare_link(link_label, target_url),
