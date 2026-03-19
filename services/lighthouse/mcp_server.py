@@ -12,7 +12,11 @@ import configparser
 import os
 import shutil
 import sys
-from typing import List, Optional
+import threading
+import time
+import traceback
+import uuid
+from typing import List, Optional, Dict, Any, Callable
 
 # MCP stdio: stdout зарезервирован для JSON-RPC.
 # Сохраняем оригинальный stdout для FastMCP, а print() → stderr.
@@ -53,26 +57,6 @@ ROUTES_CONFIG_PATH = cfg.ROUTES_CONFIG_PATH
 mcp = FastMCP("lighthouse")
 
 
-def _switch_environment(environment: str) -> str:
-    """Переключает контур в base_urls.ini и сбрасывает кэш BASE_URL."""
-    config = configparser.ConfigParser()
-    config.read(CONFIG_PATH, encoding="utf-8")
-
-    if environment not in config:
-        available = [s for s in config.sections() if s != "environments"]
-        raise ValueError(
-            f"Контур '{environment}' не найден. Доступные: {', '.join(available)}"
-        )
-
-    config["environments"]["current"] = environment
-    with open(CONFIG_PATH, "w", encoding="utf-8") as f:
-        config.write(f)
-
-    # Сброс кэша
-    cfg.BASE_URL = None
-    return cfg.get_base_url()
-
-
 def _read_environments() -> dict:
     """Читает все контуры из base_urls.ini."""
     config = configparser.ConfigParser()
@@ -99,6 +83,45 @@ def _read_routes() -> dict:
     return dict(config["routes"])
 
 
+# ─── Мини-очередь заданий (fire-and-forget + статус) ─────────────────────────
+
+JOBS: Dict[str, Dict[str, Any]] = {}
+JOBS_LOCK = threading.Lock()
+
+
+def _register_job(kind: str, payload: dict, runner: Callable[[], str]) -> str:
+    job_id = uuid.uuid4().hex[:8]
+    with JOBS_LOCK:
+        JOBS[job_id] = {
+            "kind": kind,
+            "payload": payload,
+            "status": "queued",
+            "started_at": None,
+            "ended_at": None,
+            "result": None,
+            "error": None,
+        }
+
+    def _worker():
+        with JOBS_LOCK:
+            JOBS[job_id]["status"] = "running"
+            JOBS[job_id]["started_at"] = time.time()
+        try:
+            res = runner()
+            with JOBS_LOCK:
+                JOBS[job_id]["status"] = "done"
+                JOBS[job_id]["ended_at"] = time.time()
+                JOBS[job_id]["result"] = res
+        except Exception as e:  # noqa: BLE001
+            with JOBS_LOCK:
+                JOBS[job_id]["status"] = "error"
+                JOBS[job_id]["ended_at"] = time.time()
+                JOBS[job_id]["error"] = f"{e} | {traceback.format_exc(limit=2)}"
+
+    threading.Thread(target=_worker, daemon=True).start()
+    return job_id
+
+
 # ─── Tools ────────────────────────────────────────────────────────────────────
 
 
@@ -123,12 +146,8 @@ def run_lighthouse(
     with _suppress_stdout():
         from services.lighthouse.pagespeed_service import SpeedtestService
 
-        if environment:
-            base_url = _switch_environment(environment)
-            env_name = environment
-        else:
-            env_name = cfg.get_current_environment()
-            base_url = cfg.get_base_url()
+        env_name = environment or cfg.get_current_environment()
+        base_url = cfg.get_base_url(environment=env_name)
 
         service = SpeedtestService(environment=env_name)
         service.run_local_tests(
@@ -166,12 +185,8 @@ def run_crux(
     with _suppress_stdout():
         from services.lighthouse.pagespeed_service import SpeedtestService
 
-        if environment:
-            base_url = _switch_environment(environment)
-            env_name = environment
-        else:
-            env_name = cfg.get_current_environment()
-            base_url = cfg.get_base_url()
+        env_name = environment or cfg.get_current_environment()
+        base_url = cfg.get_base_url(environment=env_name)
 
         if "PROD" not in env_name.upper():
             return (
@@ -257,6 +272,84 @@ def get_status() -> str:
             results.append(f"Текущий контур: ✗ ошибка — {e}")
 
     return "\n".join(results)
+
+
+# ─── Асинхронные задания (API для внешнего агента) ──────────────────────────
+
+
+def _format_job(job_id: str, data: dict) -> str:
+    payload = data.get("payload", {})
+    env = payload.get("environment") or payload.get("env") or "—"
+    routes = payload.get("routes") or payload.get("route_keys") or []
+    device = payload.get("device", "—")
+    return (
+        f"{job_id}: {data['status']} | {data.get('kind')} | env={env} | "
+        f"routes={routes} | device={device}"
+    )
+
+
+@mcp.tool()
+def enqueue_lighthouse(routes: List[str], device: str, iterations: int = 5, environment: Optional[str] = None) -> str:
+    """Добавляет задание на Lighthouse CLI в очередь и сразу возвращает job_id."""
+
+    def _runner() -> str:
+        with _suppress_stdout():
+            from services.lighthouse.pagespeed_service import SpeedtestService
+
+            env_name = environment or cfg.get_current_environment()
+            base_url = cfg.get_base_url(environment=env_name)
+            service = SpeedtestService(environment=env_name)
+            service.run_local_tests(route_keys=routes, device_type=device, n_iteration=iterations, base_url=base_url)
+            return f"done: env={env_name}, device={device}, routes={routes}, iterations={iterations}"
+
+    job_id = _register_job(
+        kind="lighthouse_cli",
+        payload={"routes": routes, "device": device, "iterations": iterations, "environment": environment},
+        runner=_runner,
+    )
+    return f"job_id={job_id} (lighthouse_cli queued)"
+
+
+@mcp.tool()
+def enqueue_crux(routes: List[str], device: str, environment: Optional[str] = None) -> str:
+    """Добавляет задание на CrUX сбор в очередь и возвращает job_id."""
+
+    def _runner() -> str:
+        with _suppress_stdout():
+            from services.lighthouse.pagespeed_service import SpeedtestService
+
+            env_name = environment or cfg.get_current_environment()
+            base_url = cfg.get_base_url(environment=env_name)
+            service = SpeedtestService(environment=env_name)
+            service.run_crux_data_collection(route_keys=routes, device_type=device, base_url=base_url)
+            return f"done: env={env_name}, device={device}, routes={routes}"
+
+    job_id = _register_job(
+        kind="crux",
+        payload={"routes": routes, "device": device, "environment": environment},
+        runner=_runner,
+    )
+    return f"job_id={job_id} (crux queued)"
+
+
+@mcp.tool()
+def list_jobs() -> str:
+    """Возвращает краткий статус по всем заданиям в очереди."""
+    with JOBS_LOCK:
+        if not JOBS:
+            return "Очередь пуста."
+        lines = [_format_job(jid, data) for jid, data in JOBS.items()]
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def job_status(job_id: str) -> str:
+    """Возвращает статус конкретного задания."""
+    with JOBS_LOCK:
+        data = JOBS.get(job_id)
+        if not data:
+            return f"Задание {job_id} не найдено."
+        return _format_job(job_id, data)
 
 
 if __name__ == "__main__":

@@ -13,11 +13,24 @@
      - On Windows `.venv\Scripts\activate`
      - On macOS/Linux `source .venv/bin/activate`
    - `pip install -r requirements.txt`
-3. Запустить тесты 'pytest'
-    - `pytest -m performance`
+3. Запуск готовых сценариев (CLI из корня)
+   - PROD full (VRP_PROD, все роуты, CLI+API, 5 итераций): `python run_prod_full.py`
+   - PROD main + CrUX оба проекта: `python run_prod_crux.py`
+   - PROD main оба проекта CLI+API: `python run_prod_tests.py`
+   - STAGE+TEST все роуты CLI: `python run_stage_test.py`
+   - Если нужен прямой вызов сервиса: импортируйте `SpeedtestService(environment="VRP_PROD")`
+     и вызывайте `run_local_tests`, `run_api_aggregated_tests`, `run_crux_data_collection`.
+   - Для параллельных запусков задавайте `environment` в конструкторе (не требуется менять base_urls.ini).
 
-
-py -m services.lighthouse.pagespeed_service
+### MCP/Agent API (для внешнего агента)
+- Запуск MCP: `python services/lighthouse/mcp_server.py`
+- Доступные инструменты (FastMCP):
+  - `enqueue_lighthouse(routes, device, iterations=5, environment=None)` → возвращает `job_id`, запускает Lighthouse CLI в фоне.
+  - `enqueue_crux(routes, device, environment=None)` → CrUX сбор в фоне.
+  - `list_jobs()` → статусы всех заданий (queued/running/done/error).
+  - `job_status(job_id)` → статус конкретного задания.
+  - Вспомогательные: `run_lighthouse`, `run_crux` (синхронные), `list_environments`, `list_routes`, `get_status`.
+- Параллельность: задания не трогают `base_urls.ini`, каждый `SpeedtestService` получает `environment` напрямую, поэтому несколько фоновых процессов не конфликтуют.
 
 ### Стек:
 - Pytest

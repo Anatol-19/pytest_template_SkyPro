@@ -26,7 +26,7 @@ TEMPLATE_SHEETS = {
     "crux": "_ChU_Template",
 }
 
-print("[INFO] Ищу конфиг по пути:", CONFIG_PATH, file=__import__('sys').stderr)
+print("[INFO] Ищу конфиг по пути:", CONFIG_PATH)
 if not os.path.exists(CONFIG_PATH):
     raise FileNotFoundError(f"[ERROR] Файл конфигурации не найден: {CONFIG_PATH}")
 
@@ -64,31 +64,45 @@ def get_current_environment() -> str:
     return config["environments"]["current"]
 
 
-def get_base_url() -> str:
+def _load_config():
+    if not os.path.exists(CONFIG_PATH):
+        raise FileNotFoundError(f"[ERROR] Файл конфигурации не найден: {CONFIG_PATH}")
+    config = configparser.ConfigParser()
+    config.read(CONFIG_PATH, encoding="utf-8")
+    return config
+
+
+def get_base_url(environment: str | None = None) -> str:
     """
-    Получает BASE_URL для текущего выбранного контура.
-    :return: Базовый URL для текущего окружения.
+    Получает BASE_URL.
+
+    Args:
+        environment: необязательное имя контура. Если передано, берём URL из секции env без смены
+                     `environments.current`. Это позволяет гонять несколько процессов параллельно,
+                     не перезаписывая base_urls.ini. Если не передано — используем "current" + кеш BASE_URL.
     :raises FileNotFoundError: Если файл конфигурации не найден.
-    :raises KeyError: Если отсутствует секция [environments] или ключ 'current' в base_urls.ini, или если текущий контур не найден.
+    :raises KeyError: Если отсутствует секция или контур.
     """
     global BASE_URL
+
+    if environment:
+        config = _load_config()
+        if environment not in config:
+            raise KeyError(f"[ERROR] В base_urls.ini нет секции '{environment}'")
+        return config[environment]["BASE_URL"]
+
     if BASE_URL is None:
-        config = configparser.ConfigParser()
-
-        if not os.path.exists(CONFIG_PATH):
-            raise FileNotFoundError(f"[ERROR] Файл конфигурации не найден: {CONFIG_PATH}")
-
-        config.read(CONFIG_PATH, encoding="utf-8")
+        config = _load_config()
 
         if "environments" not in config or "current" not in config["environments"]:
             raise KeyError("[ERROR] Отсутствует секция [environments] или ключ 'current' в base_urls.ini")
 
         current_env = config["environments"]["current"]
-        BASE_URL = config[current_env]["BASE_URL"]
-        print(f"[DEBUG] Указанный контур: {current_env} - {BASE_URL}")  # 🔍 Отладка. Проверим, загружены ли данные
-
         if current_env not in config:
             raise KeyError(f"[ERROR] Контур '{current_env}' не найден в base_urls.ini")
+
+        BASE_URL = config[current_env]["BASE_URL"]
+        print(f"[DEBUG] Указанный контур: {current_env} - {BASE_URL}")  # 🔍 Отладка. Проверим, загружены ли данные
 
     return BASE_URL
 
@@ -190,13 +204,34 @@ def get_google_creds_path() -> Path:
 
 def resolve_worksheet_name(environment: str, source: Literal["cli", "api", "crux"]) -> str:
     """
-    Возвращает точное имя рабочего листа Google Sheets из переменных окружения.
+    Возвращает имя рабочего листа Google Sheets по окружению и источнику.
+    
+    Структура вкладок:
+    - CrUX - общее по всем проектам
+    - VRP [PROD], VRS [PROD] - CLI и API в одном листе, колонка Type
+    - VRP [STAGE], VRP [TEST], VRP [DEV] - только CLI
+    - VRS [STAGE], VRS [TEST], VRS [DEV] - только CLI
+    - Config - управление автоформатированием
     """
-    if source == "cli":
-        return os.getenv(f"GS_WORKSHEET_{environment.upper()}", "")
-    elif source == "api":
-        return os.getenv(f"GS_WORKSHEET_{environment.upper()}", "")
-    elif source == "crux":
-        return os.getenv("GS_WORKSHEET_CHUX", "")
+    # CrUX всегда отдельный лист
+    if source == "crux":
+        return "CrUX"
+    
+    # Парсим environment: VRP_PROD -> project=VRP, env=PROD
+    env_upper = environment.upper()
+    
+    if "_" in environment:
+        parts = environment.split("_", 1)
+        project = parts[0].upper()
+        env = parts[1].upper()
     else:
-        raise ValueError(f"Неизвестный источник: {source}")
+        project = environment.upper()
+        env = "PROD"
+    
+    # Формируем имя листа
+    # PROD -> "VRP [PROD]", "VRS [PROD]"
+    # STAGE -> "VRP [STAGE]", "VRS [STAGE]"
+    # TEST -> "VRP [TEST]", "VRS [TEST]"
+    # DEV -> "VRP [DEV]", "VRS [DEV]"
+    
+    return f"{project} [{env}]"

@@ -42,39 +42,49 @@ def _format_env_label(environment: str) -> str:
     return environment
 
 def parse_lighthouse_results(json_file: str) -> Optional[dict]:
-
+    """
+    Парсит JSON-отчёт Lighthouse и возвращает метрики.
+    
+    Единицы измерения:
+    - LCP: секунды (с 2 знаками)
+    - INP: миллисекунды (целые)
+    - CLS: безразмерная (4 знака)
+    - TBT: миллисекунды (целые)
+    - FCP: миллисекунды (целые)
+    - SI: миллисекунды (целые)
+    - TTI: миллисекунды (целые)
+    - TTFB: миллисекунды (целые)
+    - P: проценты (целые)
+    """
     try:
-
         with open(json_file, "r", encoding="utf-8") as file:
-
             data = json.load(file)
 
+        # LCP: ms -> секунды (2 знака)
+        lcp_ms = data["audits"]["largest-contentful-paint"]["numericValue"]
+        lcp_sec = round(lcp_ms / 1000, 2)
+        
+        # INP: может отсутствовать, берём из max-potential-fid как fallback
+        inp_val = data.get("audits", {}).get("experimental-interaction-to-next-paint", {}).get("numericValue")
+        if inp_val is None:
+            # Fallback: max-potential-fid или 0
+            inp_val = data.get("audits", {}).get("max-potential-fid", {}).get("numericValue", 0)
+        inp_ms = int(round(inp_val))
+
         return {
-
-            "P": data["categories"]["performance"]["score"] * 100,
-
-            "LCP": data["audits"]["largest-contentful-paint"]["numericValue"],
-
-            "FCP": data["audits"]["first-contentful-paint"]["numericValue"],
-
-            "TBT": data["audits"]["total-blocking-time"]["numericValue"],
-
-            "CLS": data["audits"]["cumulative-layout-shift"]["numericValue"],
-
-            "SI": data["audits"]["speed-index"]["numericValue"],
-
-            "TTI": data["audits"]["interactive"]["numericValue"],
-
-            "TTFB": data["audits"]["server-response-time"]["numericValue"],
-
-            "INP": data.get("audits", {}).get("experimental-interaction-to-next-paint", {}).get("numericValue", 0),
-
+            "P": int(data["categories"]["performance"]["score"] * 100),
+            "LCP": lcp_sec,
+            "FCP": int(round(data["audits"]["first-contentful-paint"]["numericValue"])),
+            "TBT": int(round(data["audits"]["total-blocking-time"]["numericValue"])),
+            "CLS": round(data["audits"]["cumulative-layout-shift"]["numericValue"], 4),
+            "SI": int(round(data["audits"]["speed-index"]["numericValue"])),
+            "TTI": int(round(data["audits"]["interactive"]["numericValue"])),
+            "TTFB": int(round(data["audits"]["server-response-time"]["numericValue"])),
+            "INP": inp_ms,
         }
 
     except Exception as e:
-
         print(f"[!] Ошибка при разборе файла {json_file}: {e}")
-
         return None
 
 def parse_crux_results(json_file: str) -> Optional[Dict[str, Any]]:
@@ -116,57 +126,125 @@ def parse_crux_results(json_file: str) -> Optional[Dict[str, Any]]:
         return None
 
 def aggregate_results(results: List[Optional[Dict[str, Any]]]) -> Dict[str, Dict[str, float]]:
-
+    """
+    Агрегирует результаты Lighthouse запусков.
+    
+    Core Web Vitals (LCP, INP, CLS): p75, p90
+    Остальные метрики: только p75
+    
+    Единицы:
+    - LCP: секунды (агрегируем как секунды)
+    - INP: миллисекунды (целые)
+    - CLS: безразмерная
+    - Остальные: миллисекунды (целые)
+    """
     valid_results = [r for r in results if r is not None]
-
     if not valid_results:
-
         raise ValueError("[!] Нет валидных результатов для агрегации.")
-
+    
+    core_web_vitals = {"LCP", "INP", "CLS"}
+    time_metrics_ms = {"FCP", "TBT", "SI", "TTI", "TTFB"}  # в миллисекундах
+    
     aggregated = {}
-
     for metric in valid_results[0].keys():
-
-        values = [res[metric] for res in valid_results if metric in res]
-
-        aggregated[metric] = {
-
-            "min": round(np.min(values), 2),
-
-            "max": round(np.max(values), 2),
-
-            "avg": round(np.mean(values), 2),
-
-            "p90": round(np.percentile(values, 90), 2)
-
-        }
-
+        values = [res[metric] for res in valid_results if metric in res and isinstance(res.get(metric), (int, float))]
+        
+        if not values:
+            continue
+        
+        if metric == "CLS":
+            # CLS: 4 знака
+            decimals = 4
+        elif metric == "LCP":
+            # LCP: секунды, 2 знака
+            decimals = 2
+        elif metric == "TBT":
+            # TBT: целые
+            decimals = 0
+        else:
+            decimals = 0
+        
+        if metric in core_web_vitals:
+            aggregated[metric] = {
+                "p75": round(np.percentile(values, 75), decimals),
+                "p90": round(np.percentile(values, 90), decimals)
+            }
+        else:
+            aggregated[metric] = {
+                "p75": round(np.percentile(values, 75), decimals)
+            }
+    
     return aggregated
 
 def flatten_aggregated_metrics(aggregated: Dict[str, Dict[str, float]]) -> Dict[str, float]:
+    """
+    Преобразует агрегированные метрики в плоский словарь.
+    
+    Порядок ключей соответствует mapping Google Sheets:
+    P, LCP, INP, CLS, LCP_p90, INP_p90, CLS_p90, TBT, FCP, SI, TTI, TTFB
+    """
+    core_web_vitals = {"LCP", "INP", "CLS"}
+    
+    # Явный порядок метрик
+    ordered_result = {}
+    
+    # P (Performance score) — если есть
+    if "P" in aggregated:
+        ordered_result["P"] = aggregated["P"]["p75"]
+    
+    # Core Web Vitals: p75 затем p90 для каждой
+    for metric in ["LCP", "INP", "CLS"]:
+        if metric in aggregated:
+            ordered_result[metric] = aggregated[metric]["p75"]
+    
+    for metric in ["LCP", "INP", "CLS"]:
+        if metric in aggregated:
+            ordered_result[f"{metric}_p90"] = aggregated[metric]["p90"]
+    
+    # Остальные метрики в заданном порядке
+    for metric in ["TBT", "FCP", "SI", "TTI", "TTFB"]:
+        if metric in aggregated:
+            ordered_result[metric] = aggregated[metric]["p75"]
+    
+    return ordered_result
 
-    return {f"{metric}_{stat}": value for metric, stats in aggregated.items() for stat, value in stats.items()}
-
-def build_row(timestamp: str, project_code: str, full_url: str, route_key: str,
-
-              device_type: str, aggregated: Dict[str, Dict[str, float]]) -> Dict[str, Any]:
-
+def build_row(timestamp: str, source: str, iterations: int, environment: str, route_key: str,
+              device_type: str, aggregated: Dict[str, Dict[str, float]], full_url: str = None,
+              run_id: str = None, tag: str = "") -> Dict[str, Any]:
+    """
+    Строит строку для записи в Google Sheets.
+    
+    Структура:
+    - date, run_id, tag, type, page, device
+    - P, LCP, INP, CLS, LCP_p90, INP_p90, CLS_p90
+    - TBT, FCP, SI, TTI, TTFB
+    """
+    # Тип проверки (CLI{10} / API{10})
+    source_type = f"{source.upper()}{{{iterations}}}"
+    
+    # Тип устройства
+    device_label = "desktop" if device_type.lower() == "desktop" else "mobile"
+    
+    # Страница (route)
+    page_link = GoogleSheetsClient.prepare_link(route_key, full_url) if full_url else route_key
+    
+    # Генерация run_id если не передан
+    if run_id is None:
+        date_part = timestamp.split()[0].replace(".", ".")
+        run_id = f"{date_part}-1"
+    
     row = {
-
-        "Date": timestamp,
-
-        "Sprint": "",
-
-        "Env": project_code,
-
-        "Route": GoogleSheetsClient.prepare_link(route_key, full_url),
-
-        "Device": device_type,
-
+        "date": timestamp.split()[0] if " " in timestamp else timestamp,
+        "run_id": run_id,
+        "tag": tag,
+        "type": source_type,
+        "page": page_link,
+        "device": device_label,
     }
-
+    
+    # Добавляем метрики
     row.update(flatten_aggregated_metrics(aggregated))
-
+    
     return row
 
 def process_and_save_results(json_paths: List[str], route_key: str, device_type: str,
@@ -174,7 +252,10 @@ def process_and_save_results(json_paths: List[str], route_key: str, device_type:
                              is_local: bool = True,
                              keep_temp_files: bool = False,
                              environment: Optional[str] = None,
-                             full_url: Optional[str] = None):
+                             full_url: Optional[str] = None,
+                             iterations: int = 10,
+                             run_id: Optional[str] = None,
+                             tag: str = ""):
 
     parsed_results = [parse_lighthouse_results(p) for p in json_paths]
 
@@ -185,6 +266,7 @@ def process_and_save_results(json_paths: List[str], route_key: str, device_type:
     aggregated = aggregate_results(parsed_results)
 
     if not keep_temp_files:
+        # TODO: ограничить очистку только своим temp-каталогом, иначе параллельные запуски могут удалять чужие файлы
         cleanup_temp_files(TEMP_REPORTS_DIR)
 
     environment = environment or get_current_environment()
@@ -199,11 +281,15 @@ def process_and_save_results(json_paths: List[str], route_key: str, device_type:
     timestamp = datetime.now().strftime("%Y.%m.%d %H:%M:%S")
     row = build_row(
         timestamp=timestamp,
-        project_code=_format_env_label(environment),
-        full_url=resolved_url,
+        source=source_type.upper(),
+        iterations=iterations,
+        environment=environment,
         route_key=route_key,
         device_type=device_type,
-        aggregated=aggregated
+        aggregated=aggregated,
+        full_url=resolved_url,
+        run_id=run_id,
+        tag=tag
     )
     gsheet_client.append_result(row)
 
@@ -232,13 +318,20 @@ def process_crux_results(crux_file: str, route_key: str, device: str,
     target_url = full_url_override or get_full_url(route_key)
     link_label = route_label or route_key
     row = {
-        "Date": timestamp,
-        "Sprint": "",
-        "Env": _format_env_label(environment),
-        "Route": GoogleSheetsClient.prepare_link(link_label, target_url),
-        "Device": device,
-        **crux_metrics
-        # ToDo: нужно Добавить обработку других метрик!!!!!!!!!!
+        "date": timestamp,
+        "project": _format_env_label(environment),
+        "sprint": "",
+        "page": GoogleSheetsClient.prepare_link(link_label, target_url),
+        "device": device,
+        "LCP": crux_metrics.get("LCP_p75"),
+        "FCP": crux_metrics.get("FCP_p75"),
+        "INP": crux_metrics.get("INP_p75"),
+        "CLS": crux_metrics.get("CLS_p75"),
+        "LCP_good_pct": crux_metrics.get("LCP_good_pct"),
+        "FCP_good_pct": crux_metrics.get("FCP_good_pct"),
+        "INP_good_pct": crux_metrics.get("INP_good_pct"),
+        "CLS_good_pct": crux_metrics.get("CLS_good_pct"),
+        "TTFB": crux_metrics.get("TTFB"),
     }
 
     gsheet_client.append_result(row)

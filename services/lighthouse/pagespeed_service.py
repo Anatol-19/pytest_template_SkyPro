@@ -211,7 +211,9 @@ class SpeedtestService:
 
                         n_iteration: int = 10, keep_temp_files: bool = False,
 
-                        base_url: Optional[str] = None):
+                        base_url: Optional[str] = None,
+
+                        run_id: Optional[str] = None, tag: str = ""):
 
         """
 
@@ -221,11 +223,17 @@ class SpeedtestService:
 
         google_client = self._initialize_google_client("cli")
 
-        base_url = base_url or get_base_url()
+        base_url = base_url or get_base_url(self.environment)
 
         route_keys = route_keys or self._get_routes_from_config()
 
         routes = prepare_routes(route_keys, base_url=base_url)
+        
+        # Генерация run_id если не передан
+        if run_id is None:
+            from datetime import datetime
+            # TODO: добавить pid/uuid к run_id, чтобы параллельные прогоны не сталкивались
+            run_id = datetime.now().strftime("%Y.%m.%d") + "-1"
 
         for route_key, route_url in routes:
             print(f"[DEBUG]: Перед запуском: {route_key} — {route_url}")
@@ -236,7 +244,8 @@ class SpeedtestService:
             json_paths = run_local_lighthouse(route_key, route_url, n_iteration, device_type)
             process_and_save_results(json_paths, route_key, device_type, google_client,
                                      is_local=True, keep_temp_files=keep_temp_files,
-                                     environment=self.environment, full_url=route_url)
+                                     environment=self.environment, full_url=route_url,
+                                     iterations=n_iteration, run_id=run_id, tag=tag)
 
         google_client.flush()
 
@@ -244,7 +253,9 @@ class SpeedtestService:
 
                                  n_iteration: int = 10, keep_temp_files: bool = False,
 
-                                 base_url: Optional[str] = None):
+                                 base_url: Optional[str] = None,
+
+                                 run_id: Optional[str] = None, tag: str = ""):
 
         """
 
@@ -254,11 +265,16 @@ class SpeedtestService:
 
         google_client = self._initialize_google_client("api")
 
-        base_url = base_url or get_base_url()
+        base_url = base_url or get_base_url(self.environment)
 
         route_keys = route_keys or self._get_routes_from_config()
 
         routes = prepare_routes(route_keys, base_url=base_url)
+        
+        # Генерация run_id если не передан
+        if run_id is None:
+            from datetime import datetime
+            run_id = datetime.now().strftime("%Y.%m.%d") + "-1"
 
         for route_key, route_url in routes:
 
@@ -296,7 +312,8 @@ class SpeedtestService:
 
             process_and_save_results(json_paths, route_key, device_type, google_client,
                                      is_local=False, keep_temp_files=keep_temp_files,
-                                     environment=self.environment, full_url=route_url)
+                                     environment=self.environment, full_url=route_url,
+                                     iterations=n_iteration, run_id=run_id, tag=tag)
 
         google_client.flush()
 
@@ -305,7 +322,7 @@ class SpeedtestService:
                                  include_origin: bool = False):
         """Выполняет сбор CrUX: page (field) + опционально origin по каждому роуту и девайсу."""
         google_client = self._initialize_google_client("crux")
-        base_url = base_url or get_base_url()
+        base_url = base_url or get_base_url(self.environment)
         route_keys = route_keys or self._get_routes_from_config()
         routes = prepare_routes(route_keys, base_url=base_url)
 

@@ -110,31 +110,26 @@ class GoogleSheetsClient:
             raise
 
     # Заголовки по умолчанию для каждого типа источника
+    # Mapping: date(A), run_id(B), tag(C), type(D), page(E), device(F),
+    #          P(G), LCP(H), INP(I), CLS(J), LCP_p90(K), INP_p90(L), CLS_p90(M),
+    #          TBT(N), FCP(O), SI(P), TTI(Q), TTFB(R)
     DEFAULT_HEADERS = {
-        "cli": ["Date", "Sprint", "Env", "Route", "Device",
-                "P_min", "P_max", "P_avg", "P_p90",
-                "LCP_min", "LCP_max", "LCP_avg", "LCP_p90",
-                "FCP_min", "FCP_max", "FCP_avg", "FCP_p90",
-                "TBT_min", "TBT_max", "TBT_avg", "TBT_p90",
-                "CLS_min", "CLS_max", "CLS_avg", "CLS_p90",
-                "SI_min", "SI_max", "SI_avg", "SI_p90",
-                "TTI_min", "TTI_max", "TTI_avg", "TTI_p90",
-                "TTFB_min", "TTFB_max", "TTFB_avg", "TTFB_p90",
-                "INP_min", "INP_max", "INP_avg", "INP_p90"],
-        "api": ["Date", "Sprint", "Env", "Route", "Device",
-                "P_min", "P_max", "P_avg", "P_p90",
-                "LCP_min", "LCP_max", "LCP_avg", "LCP_p90",
-                "FCP_min", "FCP_max", "FCP_avg", "FCP_p90",
-                "TBT_min", "TBT_max", "TBT_avg", "TBT_p90",
-                "CLS_min", "CLS_max", "CLS_avg", "CLS_p90",
-                "SI_min", "SI_max", "SI_avg", "SI_p90",
-                "TTI_min", "TTI_max", "TTI_avg", "TTI_p90",
-                "TTFB_min", "TTFB_max", "TTFB_avg", "TTFB_p90",
-                "INP_min", "INP_max", "INP_avg", "INP_p90"],
-        "crux": ["Date", "Sprint", "Env", "Route", "Device",
-                 "LCP_p75", "FCP_p75", "INP_p75", "CLS_p75",
-                 "LCP_good_pct", "FCP_good_pct", "INP_good_pct", "CLS_good_pct",
-                 "TTFB"],
+        "cli": [
+            "date", "run_id", "tag", "type", "page", "device",
+            "P", "LCP", "INP", "CLS", "LCP_p90", "INP_p90", "CLS_p90",
+            "TBT", "FCP", "SI", "TTI", "TTFB"
+        ],
+        "api": [
+            "date", "run_id", "tag", "type", "page", "device",
+            "P", "LCP", "INP", "CLS", "LCP_p90", "INP_p90", "CLS_p90",
+            "TBT", "FCP", "SI", "TTI", "TTFB"
+        ],
+        "crux": [
+            "date", "project", "sprint", "page", "device",
+            "LCP", "FCP", "INP", "CLS",
+            "LCP_good_pct", "FCP_good_pct", "INP_good_pct", "CLS_good_pct",
+            "TTFB", "run_id", "tag"
+        ],
     }
 
     def ensure_sheet_exists(self, sheet_name: str, source: Literal["cli", "api", "crux"]):
@@ -218,4 +213,4 @@ class GoogleSheetsClient:
         :param url: URL-адрес.
         :return: Строка с формулой Google Sheets для гиперссылки.
         """
-        return f'=HYPERLINK("{url}"; "{anchor}")'
+        return f'=HYPERLINK("{url}", "{anchor}")'
