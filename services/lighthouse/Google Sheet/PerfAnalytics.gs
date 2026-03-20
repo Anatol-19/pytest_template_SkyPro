@@ -2,7 +2,8 @@ const RUNS_SHEET = 'Runs';
 const ROUTES_SHEET = 'Routes';
 const STABILITY_SHEET = 'Stability';
 const DASHBOARD_SHEET = 'Dashboard';
-const CONFIG_SHEET = 'Config';
+const DASHBOARD_COLUMN_WIDTHS = [160, 140, 120, 110, 110, 120, 120, 120, 100, 100, 100, 100, 100, 100, 200];
+const DASHBOARD_CONFIG_SHEET = 'Config';
 
 const TIME_METRIC_KEYS = ['lcp', 'inp', 'ttfb', 'fcp', 'tbt', 'tti', 'si', 'speed', 'interactive'];
 
@@ -106,9 +107,12 @@ function showEmptyMessage(sheet) {
 }
 
 function autoSizeColumns(sheet) {
-  for (let i = 1; i <= 10; i++) {
-    sheet.setColumnWidth(i, 130);
+  DASHBOARD_COLUMN_WIDTHS.forEach((width, index) => sheet.setColumnWidth(index + 1, width));
+  const extraCols = 5;
+  for (let i = DASHBOARD_COLUMN_WIDTHS.length + 1; i <= DASHBOARD_COLUMN_WIDTHS.length + extraCols; i++) {
+    sheet.setColumnWidth(i, 120);
   }
+  sheet.getRange(1, 1, 1, DASHBOARD_COLUMN_WIDTHS.length).setWrap(true);
 }
 
 function readSheetRecords(sheet) {
@@ -273,7 +277,7 @@ function buildStabilityMap(records) {
 }
 
 function loadMetricThresholds(ss) {
-  const sheet = ss.getSheetByName(CONFIG_SHEET);
+  const sheet = ss.getSheetByName(DASHBOARD_CONFIG_SHEET);
   const metrics = {};
   if (!sheet) {
     return populateFallbackThresholds(metrics);
@@ -389,22 +393,31 @@ function renderTitleBlock(sheet, row) {
   range.setBackground(BLOCK_HEADER_COLOR);
   range.setFontColor(BLOCK_HEADER_FONT_COLOR);
   range.setHorizontalAlignment('center');
+  sheet.setRowHeight(row, 32);
   return row + 2;
 }
 
+function renderBlockHeader(sheet, row, title, span = 4) {
+  const range = sheet.getRange(row, 1, 1, span);
+  range.merge();
+  range.setValue(title);
+  range.setBackground(BLOCK_HEADER_COLOR);
+  range.setFontColor(BLOCK_HEADER_FONT_COLOR);
+  range.setFontWeight('bold');
+  range.setHorizontalAlignment('left');
+  range.setVerticalAlignment('middle');
+  range.setFontSize(12);
+  return row + 1;
+}
+
 function renderAlertsBlock(sheet, row, latest, previous, routes, stabilityRows) {
-  const header = sheet.getRange(row, 1, 1, 3);
-  header.setValues([['BLOCK 0 — ALERTS (AUTO QA)', '', '']]);
-  header.setBackground(BLOCK_HEADER_COLOR);
-  header.setFontColor(BLOCK_HEADER_FONT_COLOR);
-  header.setFontWeight('bold');
-  row++;
+  row = renderBlockHeader(sheet, row, 'BLOCK 0 — ALERTS (AUTO QA)', 4);
   const alerts = buildAlerts(latest, previous, routes, stabilityRows);
   if (!alerts.length) {
     sheet.getRange(row, 1).setValue('Нет критичных отклонений — CWV в норме.').setFontStyle('italic');
     return row + 2;
   }
-  sheet.getRange(row, 1, 1, 3).setValues([['Level', 'Alert', 'Reason']]).setFontWeight('bold');
+  sheet.getRange(row, 1, 1, 3).setValues([['Level', 'Alert', 'Reason']]).setFontWeight('bold').setBackground('#ECEFF1');
   row++;
   alerts.forEach(alert => {
     sheet.getRange(row, 1).setValue(alert.level).setBackground(ALERT_COLORS[alert.level] || '#FFF3E0');
@@ -518,12 +531,7 @@ function describeMainThread(latest) {
 }
 
 function renderOverviewBlock(sheet, row, latest, thresholds) {
-  const header = sheet.getRange(row, 1, 1, 3);
-  header.setValues([['BLOCK 1 — OVERVIEW', '', '']]);
-  header.setBackground(BLOCK_HEADER_COLOR);
-  header.setFontColor(BLOCK_HEADER_FONT_COLOR);
-  header.setFontWeight('bold');
-  row++;
+  row = renderBlockHeader(sheet, row, 'BLOCK 1 — OVERVIEW', 3);
   sheet.getRange(row, 1, 1, 3).setValues([['Metric', 'Value', 'Status']]).setFontWeight('bold');
   row++;
   [
@@ -543,12 +551,7 @@ function renderOverviewBlock(sheet, row, latest, thresholds) {
 }
 
 function renderTrendBlock(sheet, row, trendRuns, stabilityRows) {
-  const header = sheet.getRange(row, 1, 1, 4);
-  header.setValues([['BLOCK 2 — TREND', '', '', '']]);
-  header.setBackground(BLOCK_HEADER_COLOR);
-  header.setFontColor(BLOCK_HEADER_FONT_COLOR);
-  header.setFontWeight('bold');
-  row++;
+  row = renderBlockHeader(sheet, row, 'BLOCK 2 — TREND', 4);
   if (!trendRuns.length) {
     sheet.getRange(row, 1).setValue('Нет истории прогонов.');
     return row + 2;
@@ -604,19 +607,14 @@ function renderTrendBlock(sheet, row, trendRuns, stabilityRows) {
 }
 
 function renderWorstPagesBlock(sheet, row, routes) {
-  const header = sheet.getRange(row, 1, 1, 5);
-  header.setValues([['BLOCK 3 — WORST PAGES', '', '', '', '']]);
-  header.setBackground(BLOCK_HEADER_COLOR);
-  header.setFontColor(BLOCK_HEADER_FONT_COLOR);
-  header.setFontWeight('bold');
-  row++;
+  row = renderBlockHeader(sheet, row, 'BLOCK 3 — WORST PAGES', 5);
   if (!routes.length) {
     sheet.getRange(row, 1).setValue('Routes not collected.');
     return row + 2;
   }
   const sorted = routes.slice().sort((a, b) => (b.lcp || 0) - (a.lcp || 0));
   const rows = sorted.slice(0, 10);
-  sheet.getRange(row, 1, 1, 5).setValues([['Page', 'Device', 'LCP p90', 'INP p90', 'CLS p90']]).setFontWeight('bold');
+  sheet.getRange(row, 1, 1, 5).setValues([['Page', 'Device', 'LCP p90', 'INP p90', 'CLS p90']]).setFontWeight('bold').setBackground('#ECEFF1');
   row++;
   rows.forEach(route => {
     sheet.getRange(row, 1).setValue(route.page);
@@ -637,12 +635,7 @@ function renderWorstPagesBlock(sheet, row, routes) {
 }
 
 function renderDeviceSplitBlock(sheet, row, routes) {
-  const header = sheet.getRange(row, 1, 1, 4);
-  header.setValues([['BLOCK 4 — DEVICE SPLIT', '', '', '']]);
-  header.setBackground(BLOCK_HEADER_COLOR);
-  header.setFontColor(BLOCK_HEADER_FONT_COLOR);
-  header.setFontWeight('bold');
-  row++;
+  row = renderBlockHeader(sheet, row, 'BLOCK 4 — DEVICE SPLIT', 4);
   if (!routes.length) {
     sheet.getRange(row, 1).setValue('Нет данных по девайсам.');
     return row + 2;
@@ -673,7 +666,7 @@ function renderDeviceSplitBlock(sheet, row, routes) {
       cls: parseFloat((totals.cls / count).toFixed(3)) || 0,
     };
   });
-  sheet.getRange(row, 1, 1, 4).setValues([['Device', 'LCP p90', 'INP p90', 'CLS p90']]).setFontWeight('bold');
+  sheet.getRange(row, 1, 1, 4).setValues([['Device', 'LCP p90', 'INP p90', 'CLS p90']]).setFontWeight('bold').setBackground('#ECEFF1');
   row++;
   rows.forEach(entry => {
     sheet.getRange(row, 1).setValue(entry.device);
@@ -693,18 +686,13 @@ function renderDeviceSplitBlock(sheet, row, routes) {
 }
 
 function renderDiagnosticsBlock(sheet, row, latest) {
-  const header = sheet.getRange(row, 1, 1, 2);
-  header.setValues([['BLOCK 5 — DIAGNOSTICS', '']]);
-  header.setBackground(BLOCK_HEADER_COLOR);
-  header.setFontColor(BLOCK_HEADER_FONT_COLOR);
-  header.setFontWeight('bold');
-  row++;
+  row = renderBlockHeader(sheet, row, 'BLOCK 5 — DIAGNOSTICS', 3);
   const diagnostics = buildDiagnostics(latest);
   if (!diagnostics.length) {
     sheet.getRange(row, 1).setValue('Сигналов нет, продолжай мониторинг.');
     return row + 2;
   }
-  sheet.getRange(row, 1, 1, 2).setValues([['Issue', 'Reason']]).setFontWeight('bold');
+  sheet.getRange(row, 1, 1, 2).setValues([['Issue', 'Reason']]).setFontWeight('bold').setBackground('#ECEFF1');
   row++;
   diagnostics.forEach(item => {
     sheet.getRange(row, 1).setValue(item.title);
@@ -732,17 +720,12 @@ function buildDiagnostics(latest) {
 }
 
 function renderRouteHealthBlock(sheet, row, routes, stabilityMap) {
-  const header = sheet.getRange(row, 1, 1, 5);
-  header.setValues([['BLOCK 6 — ROUTE HEALTH', '', '', '', '']]);
-  header.setBackground(BLOCK_HEADER_COLOR);
-  header.setFontColor(BLOCK_HEADER_FONT_COLOR);
-  header.setFontWeight('bold');
-  row++;
+  row = renderBlockHeader(sheet, row, 'BLOCK 6 — ROUTE HEALTH', 5);
   if (!routes.length) {
     sheet.getRange(row, 1).setValue('Нет данных по маршрутам.');
     return row + 2;
   }
-  sheet.getRange(row, 1, 1, 5).setValues([['Page', 'Type', 'Device', 'Status', 'Reason']]).setFontWeight('bold');
+  sheet.getRange(row, 1, 1, 5).setValues([['Page', 'Type', 'Device', 'Status', 'Reason']]).setFontWeight('bold').setBackground('#ECEFF1');
   row++;
   routes.forEach(route => {
     const key = `${route.page}|${route.device.toLowerCase()}`;
@@ -771,13 +754,8 @@ function evaluateRouteHealth(route, stability) {
 }
 
 function renderExperimentsBlock(sheet, row, runs) {
-  const header = sheet.getRange(row, 1, 1, 7);
-  header.setValues([['BLOCK 7 — EXPERIMENTS', '', '', '', '', '', '']]);
-  header.setBackground(BLOCK_HEADER_COLOR);
-  header.setFontColor(BLOCK_HEADER_FONT_COLOR);
-  header.setFontWeight('bold');
-  row++;
-  sheet.getRange(row, 1, 1, 7).setValues([['Tag', 'Run ID', 'LCP p90', 'Δ LCP', 'INP p90', 'CLS p90', 'Result']]).setFontWeight('bold');
+  row = renderBlockHeader(sheet, row, 'BLOCK 7 — EXPERIMENTS', 7);
+  sheet.getRange(row, 1, 1, 7).setValues([['Tag', 'Run ID', 'LCP p90', 'Δ LCP', 'INP p90', 'CLS p90', 'Result']]).setFontWeight('bold').setBackground('#ECEFF1');
   row++;
   let hasTag = false;
   runs.forEach((run, index) => {

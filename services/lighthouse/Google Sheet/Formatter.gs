@@ -8,7 +8,7 @@ const PERF_SHEETS = [
 ]
 
 const CRUX_SHEET = 'CrUX'
-const CONFIG_SHEET = 'Config'
+const FORMATTER_CONFIG_SHEET = 'Config'
 
 const TECH_HEADERS = [
   'date','type','page','device',
@@ -224,7 +224,7 @@ function colorRule(sheet,range,a,b,color,type){
 
 function loadMetricThresholds(){
   const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const sheet = ss.getSheetByName(CONFIG_SHEET);
+  const sheet = ss.getSheetByName(FORMATTER_CONFIG_SHEET);
   if (!sheet) return [];
   const values = sheet.getDataRange().getValues();
   if (values.length < 2) return [];
