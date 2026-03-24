@@ -1,11 +1,64 @@
 const RUNS_SHEET = 'Runs';
 const ROUTES_SHEET = 'Routes';
 const STABILITY_SHEET = 'Stability';
-const DASHBOARD_SHEET = 'Dashboard';
+const DASHBOARD_SHEETS = ['Dashboard [VRP]', 'Dashboard [VRS]'];
+const DASHBOARD_PROJECTS = ['VRP', 'VRS'];
 const DASHBOARD_COLUMN_WIDTHS = [160, 140, 120, 110, 110, 120, 120, 120, 100, 100, 100, 100, 100, 100, 200];
 const DASHBOARD_CONFIG_SHEET = 'Config';
+const CRUX_SOURCE_SHEET = 'CrUX';
+const CHART_COLUMN = 10;
+const HELPER_COLUMN_PRIMARY = 20;
+const HELPER_COLUMN_SECONDARY = 26;
+const CROSS_ENV_BLOCK_HEIGHT = 18;
+const TREND_BLOCK_HEIGHT = 36;
+const WORST_PAGES_BLOCK_HEIGHT = 18;
+const DEVICE_SPLIT_BLOCK_HEIGHT = 18;
+const CONTROL_START_ROW = 1;
+const CONTROL_RENDER_START_ROW = 15;
+
+// Жёсткая сетка — фиксированные начала блоков (row numbers)
+const LAYOUT = {
+  CONTROLS:       { row: 1,   height: 14 },
+  CONTEXT:        { row: 15,  height: 8  },
+  ALERTS:         { row: 23,  height: 12 },
+  CRUX_REF:       { row: 35,  height: 8  },
+  OVERVIEW:       { row: 43,  height: 8  },
+  CROSS_ENV:      { row: 51,  height: 18 },
+  SPRINT_IMPACT:  { row: 51,  height: 18 },   // заменяет CROSS_ENV в Sprint mode
+  TREND:          { row: 69,  height: 36 },
+  WORST_PAGES:    { row: 105, height: 18 },
+  DEVICE_SPLIT:   { row: 123, height: 18 },
+  DIAGNOSTICS:    { row: 141, height: 12 },
+  ROUTE_HEALTH:   { row: 153, height: 30 },
+  EXPERIMENTS:    { row: 183, height: 20 },
+};
+
+// Зоны графиков (фиксированные позиции)
+const CHART_ZONES = {
+  CROSS_ENV:    { row: 52,  col: 10 },
+  TREND:        { row: 70,  col: 10 },
+  STABILITY:    { row: 88,  col: 10 },
+  DEVICE:       { row: 124, col: 10 },
+  SPRINT:       { row: 52,  col: 10 },
+};
+
+const GENERATE_BUTTON_ANCHOR = { row: 4, column: 9, offsetX: 8, offsetY: 6, width: 220, height: 44 };
+const GENERATE_BUTTON_PNG_BASE64 = 'iVBORw0KGgoAAAANSUhEUgAAANwAAAAsCAYAAAAOyNaYAAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsMAAA7DAcdvqGQAAAeRSURBVHhe7V3dax1FFO8/0dpE27745puPPlkj9itIaxR98lFE1BjUxtaWoH1pJVYL0ogvSaGiIKGEqAWpQhIfYj8oNpRCe6GkEhopDYaCqC8jM/feuTNnzjkzuzfZ7m7OD36Q7J4zc2bm/HZm9+7HJiUQCArDJrjBxc3lRfXN/Hn1yQ/jleREYxU2CcWtq/n8DJZnSL+VxhQbk7sf+rJg6mTx4JqaQPrJcPaaWoH2Tj1tfr8MjTisqvnZHHEi9VaFE3NT6vLt67BFFoHg/vnvX3Vs6iv12NBzavObT1eWz19Ygk1jsKTGT+T0XRhl/Pxyoc3ihdfR7VGwdfJw66Ti6mBeHQJ2hxagDYdO+/HyCTjtqzJfG/9Y/bl632uaJ7iFP26pp469ah22DD6jtg7vUr1H91aLp8+pRbdh6pL6ENpMXvIs1I3P7b4Dc44o5gbD8gm6fhZOudDGLZvaHmOKnxfXvXPqQGAzqCbutQ2W1MyNjv3MJLQFdPsaLTuMgYqzDuz5YJfaMtRnNfT4+/3qx9/nbNut4PTM9uTIK8bokaE+te34frXjs5cqyYGLd20DVWMs2G95/ooxmT1P+9+5OBz6EfTqdeCWT5VNbY8xye/stLrTNlqZVgOx/fB/aM/5wv0tJsVZI24fHVBbDzZXiXq1eOd+s/1WcO99e7IptnefVTtOvhgUUB0OqzP2ZOSuOnMW7o8zb3J4fiuu+K6oo5hNQYI72rAm6AEoLCNDH4rgWPYc3m109fLpg6btRnB6dmufs207fiBwqhbH1Kwd2k6iZyE1U4Xwy/eTasxJ2k6SUYm3FnWmAM7mlLioOAPmEByPfGNWVuqZTp+aaW3pWc4ITp+7mXO2ob7AoXp0BIckAD3w+CzEg05+k6RuMraSObBBfHnQdcaACqe1rDbwZr/EA5cILkp9HUTrS5/LGcF9+ct3ZoOe/qBx9cgnCj3w6yA4WFZjDLUJ7FjQdeLgl4TuchPOftw+SxFclL0j+4y+9M8GRnD6D71BX2WBxtUjvkRqkx54XHDorEAQ93MPAP65HSW47usE521IPzTpx8YCOfczzCG4LO2rA7Wuaiw4IComCajZMG9ykH7uss3BegpOMyo6Ii4ciL+mCC7K2gvOP3fSwJYp7kzo2+RNDtoP1hXa0L48eT8wgwFB+IKMIyxfBJfC+gsOznIpcJIlm2+iUIODAC24OBLrROq1Nt527IDUojsLYoLKIbg4mHgqyA0hOMPEJRNM1LzJEUt+WG4hggvKDq+Wkudnhv4sGVw8EcFFuXEE1yI12EHyROxxZEl+cAGlIMEFS9rGtPc/1Q9obFCcIrgoN5zghMKHSRGcUFggRXBCYYEUwQmFBVIEJxQWSBGcUFggRXBCYYEUwQmFBVIEJxQWSBGcUFggKyu4pNuD4K1HBKOPrmBEbkDWoG6pSrrtyrnfM8+tXmS5lviTCsltzthXqXFj45Tki/iVnfUWnAGfFKhwIgMZf5QlvP+vCMEZEPcwxmOmfS0z9lU3caf7Rsa3ZNwAgtMIBcCXQ9unPnXAJdC6Cg4pP5M/Izq8HLqvcHsa+dtMx1A21kJwMMEMgTBQG/AKhtlGp0zqrnn2NXNenf6RNxov8KeSj/Il44KzEiIomNx4Hdn7KiVur27iOUTUN2l8y8f6Ck4z6wOT8H9on/AyHWp/1nizCo564xYpREgvgZEZA/YN/B/ap8ZNlJPkGxvfErLegsvwEqFmGbw99NHARIcxrCu06UZwuNDj7emQtw1j4O1xn9CGOiCk+KbEUDbWXHDugMIBwQcrXi73ditkZkDiTQEluCjyvE+yRVy0mvn6KlPceVYE7PiWkxtXcMQSLC1JOdE1AWe+rMmXT3Aw6fgX4UK69Xjx5+yr9LjDMex6fEvKDSs4+mjO74PkLrdTR+wU5BNcEx1fXhCQVLup7bF98bhpkXQ7vmVlzQWHL4VSZigL7kJDQPDDchcXASjBkb7om7eo9mOkbPP3FRW3f5DC46J802IuL+stOOIKGLykzMMZSKo8j/iskhRvN4IjjvZecpMxw9nImQ3z9lUk7pjoOF/LpPEoFwPBnfrp66bgjuwJjMvE6ICA35/oI2wc+BINH2QqwaPxanYjOK+9xEHCIFxawv5Ym76Kxc33Je8btgu1KSGDbwv8fP03s8F8Gw5xKAv9I3IMTpKhSy+ExG88WepNT76wTso3CUzyRuH6rmFfoW1mRJMpZi62krHn8B6jL/39byO4v/5+YDZsfmun2v5peT/GmD4g9DIHnnP4pF96mnTUZ5IeTT7NNRIcvHiRXAYTc56+SmmzH1dnrJLiNQiXo2Wm/qKw1pf+LJwRnMb+U++YjWX+ZFXKgISD7F/UwBKTrAMmXLBUawNPgJTk615wsSM9uKhjgcXcfV8ltRnGhPhSoMssJ3tH+o2u9Oe8Nazgbi4v2q+g9h7ZW/HPDguFD5+PftSvNr+902hKn7Z5gtPQa0yztGx9DVWvPfUVFqFQmMiRfWbCai8jNY9MfmE15glO4/Lt62r36BvWWCgU5uMTh1+wM1sbgeDa0MLTM56+lCkUCtOpf2b79eZVKCmD/wGsfK39krKdlQAAAABJRU5ErkJggg==';
+const SPRINT_METADATA_CELLS = {
+  currentSprint: 'E5',
+  nextSprint: 'E6',
+  devDone: 'D9',
+  testDone: 'E9',
+  stageDone: 'F9',
+  prodDone: 'G9',
+};
+const RAW_PERF_SHEETS = ['VRP [PROD]', 'VRP [STAGE]', 'VRP [TEST]', 'VRP [DEV]', 'VRS [PROD]', 'VRS [STAGE]', 'VRS [TEST]', 'VRS [DEV]', 'CrUX'];
+const RUNS_HEADERS = ['date', 'project', 'environment', 'source', 'sprint', 'run_id', 'tag', 'iterations', 'pages', 'avg_score', 'p90_lcp', 'p90_inp', 'p90_cls', 'ttfb', 'tbt', 'fcp', 'tti', 'speed'];
+const ROUTES_HEADERS = ['date', 'project', 'environment', 'source', 'sprint', 'run_id', 'tag', 'page', 'device', 'type', 'tests', 'avg_score', 'p90_lcp', 'p90_inp', 'p90_cls', 'ttfb'];
+const STABILITY_HEADERS = ['project', 'environment', 'source', 'page', 'device', 'lcp_std', 'inp_std', 'cls_std', 'stability_score'];
 
 const TIME_METRIC_KEYS = ['lcp', 'inp', 'ttfb', 'fcp', 'tbt', 'tti', 'si', 'speed', 'interactive'];
+const PERF_SHEET_ID_KEYS = ['GS_SHEET_ID', 'SHEET_ID'];
 
 const ROUTE_TYPE_MAP = {
   main: 'home',
@@ -36,62 +89,385 @@ const BLOCK_HEADER_COLOR = '#1B1F24';
 const BLOCK_HEADER_FONT_COLOR = '#FFFFFF';
 
 const DEFAULT_METRIC_FALLBACKS = [
+  { metric: 'p', good: 90, poor: 50, direction: 'high_good' },
+  { metric: 'lcp', good: 2500, poor: 4000, direction: 'low_good' },
+  { metric: 'inp', good: 120, poor: 500, direction: 'low_good' },
+  { metric: 'cls', good: 0.12, poor: 0.25, direction: 'low_good' },
+  { metric: 'ttfb', good: 800, poor: 1800, direction: 'low_good' },
+  { metric: 'fcp', good: 1800, poor: 3000, direction: 'low_good' },
   { metric: 'paint', good: 2500, poor: 4000, direction: 'low_good' },
   { metric: 'speed', good: 3400, poor: 5800, direction: 'low_good' },
   { metric: 'interactive', good: 3800, poor: 7300, direction: 'low_good' },
   { metric: 'network', good: 800, poor: 1800, direction: 'low_good' },
+  { metric: 'tti', good: 3800, poor: 7300, direction: 'low_good' },
 ];
 
 function updatePerfAnalytics() {
-  const ss = SpreadsheetApp.getActive();
+  const ss = getPerfSpreadsheet();
   ensurePerfAnalyticsTriggers(ss);
-  const dashboard = getOrCreateSheet(ss, DASHBOARD_SHEET);
-  dashboard.clear();
-  dashboard.getCharts().forEach(chart => dashboard.removeChart(chart));
+  rebuildAnalyticsHelperSheets(ss);
 
   const runRecords = readSheetRecords(ss.getSheetByName(RUNS_SHEET));
-  if (!runRecords.length) {
-    showEmptyMessage(dashboard);
-    return;
-  }
-  const runs = runRecords.map(extractRunMetrics).filter(Boolean);
-  if (!runs.length) {
-    showEmptyMessage(dashboard);
-    return;
-  }
+  const routeRecords = readSheetRecords(ss.getSheetByName(ROUTES_SHEET));
+  const stabilityRecords = readSheetRecords(ss.getSheetByName(STABILITY_SHEET));
+  const cruxRecords = readSheetRecords(ss.getSheetByName(CRUX_SOURCE_SHEET));
 
-  const routes = readSheetRecords(ss.getSheetByName(ROUTES_SHEET)).map(parseRouteRecord).filter(Boolean);
-  const stabilityRows = readSheetRecords(ss.getSheetByName(STABILITY_SHEET)).map(parseStabilityRecord).filter(Boolean);
-  const stabilityMap = buildStabilityMap(stabilityRows);
+  const runs = runRecords.map(extractRunMetrics).filter(Boolean);
+  const routes = routeRecords.map(parseRouteRecord).filter(Boolean);
+  const stabilityRows = stabilityRecords.map(parseStabilityRecord).filter(Boolean);
+  const cruxRows = cruxRecords.map(parseRouteRecord).filter(Boolean).filter(item => normalizeSource(item.source) === 'CRUX');
   const thresholds = loadMetricThresholds(ss);
 
-  const latest = runs[runs.length - 1];
-  const previous = runs.length > 1 ? runs[runs.length - 2] : null;
-  const trendRuns = runs.slice(-10);
+  DASHBOARD_PROJECTS.forEach(project => {
+    const dashboard = getOrCreateSheet(ss, `Dashboard [${project}]`);
+    renderProjectDashboard(dashboard, project, runs, routes, stabilityRows, cruxRows, thresholds);
+  });
+}
 
-  let cursor = renderTitleBlock(dashboard, 1);
-  cursor = renderAlertsBlock(dashboard, cursor, latest, previous, routes, stabilityRows);
-  cursor = renderOverviewBlock(dashboard, cursor, latest, thresholds);
-  cursor = renderTrendBlock(dashboard, cursor, trendRuns, stabilityRows);
-  cursor = renderWorstPagesBlock(dashboard, cursor, routes);
-  cursor = renderDeviceSplitBlock(dashboard, cursor, routes);
-  cursor = renderDiagnosticsBlock(dashboard, cursor, latest);
-  cursor = renderRouteHealthBlock(dashboard, cursor, routes, stabilityMap);
-  cursor = renderExperimentsBlock(dashboard, cursor, runs);
-  autoSizeColumns(dashboard);
+function onOpen() {
+  SpreadsheetApp.getUi()
+    .createMenu('QA Dashboard')
+    .addItem('Generate Dashboard', 'updatePerfAnalytics')
+    .addToUi();
+}
+
+function renderProjectDashboard(sheet, project, allRuns, allRoutes, allStabilityRows, allCruxRows, thresholds) {
+  const projectRuns = allRuns.filter(run => matchesProject(run.project, project));
+  const projectRoutes = allRoutes.filter(route => matchesProject(route.project, project));
+  const projectStabilityRows = allStabilityRows.filter(item => matchesProject(item.project, project));
+  const projectCruxRows = allCruxRows.filter(item => matchesProject(item.project, project));
+  const sprintConfig = readSprintMetadata(sheet);
+  const filters = readDashboardFilters(sheet, project, projectRuns, projectRoutes, sprintConfig);
+  const mode = normalizeDashboardMode_(filters.mode);
+
+  clearDashboardRenderArea(sheet);
+  prepareDashboardControls(sheet, project, filters, projectRuns, sprintConfig);
+
+  if (!projectRuns.length) {
+    showEmptyMessage(sheet, project);
+    return;
+  }
+
+  const runs = applyRunFilters(projectRuns, filters, sprintConfig);
+  const routes = applyRouteFilters(projectRoutes, filters, sprintConfig);
+  const stabilityRows = applyStabilityFilters(projectStabilityRows, filters);
+  const effectiveRuns = runs.length ? runs : projectRuns;
+  const effectiveRoutes = routes.length ? routes : projectRoutes;
+  const effectiveStabilityRows = stabilityRows.length ? stabilityRows : projectStabilityRows;
+
+  const stabilityMap = buildStabilityMap(effectiveStabilityRows);
+  const latest = getLatestRunForFilters(effectiveRuns, filters, sprintConfig) || projectRuns[projectRuns.length - 1];
+  const previous = effectiveRuns.length > 1 ? effectiveRuns[effectiveRuns.length - 2] : (projectRuns.length > 1 ? projectRuns[projectRuns.length - 2] : null);
+  const trendRuns = effectiveRuns.slice(-10);
+  const context = buildContextMetrics(project, filters, latest, effectiveRuns, effectiveRoutes, sprintConfig);
+
+  if (mode === 'SPRINT') {
+    renderSprintImpactBlock(sheet, LAYOUT.SPRINT_IMPACT.row, project, filters, effectiveRuns, effectiveRoutes, thresholds, 'БЛОК 1 — SPRINT IMPACT');
+    renderTrendBlock(sheet, LAYOUT.TREND.row, trendRuns, effectiveStabilityRows, effectiveRoutes);
+    renderWorstPagesBlock(sheet, LAYOUT.WORST_PAGES.row, effectiveRoutes, thresholds, 'БЛОК 2 — ХУДШИЕ СТРАНИЦЫ');
+    renderAlertsBlock(sheet, LAYOUT.ALERTS.row, context.latest, previous, effectiveRoutes, effectiveStabilityRows, thresholds, 'БЛОК 3 — АЛЕРТЫ');
+    return;
+  }
+
+  renderContextOverviewBlock(sheet, LAYOUT.CONTEXT.row, context, thresholds);
+  renderAlertsBlock(sheet, LAYOUT.ALERTS.row, context.latest, previous, effectiveRoutes, effectiveStabilityRows, thresholds, 'БЛОК 2 — АЛЕРТЫ');
+  renderCruxReferenceBlock(sheet, LAYOUT.CRUX_REF.row, context.latest, projectCruxRows);
+  renderOverviewBlock(sheet, LAYOUT.OVERVIEW.row, context.latest, thresholds);
+  if (shouldRenderCrossEnvBlock(filters)) {
+    renderCrossEnvComparisonBlock(sheet, LAYOUT.CROSS_ENV.row, project, filters, effectiveRuns, effectiveRoutes, thresholds, 'БЛОК 3 — СРЕЗ ПО КОНТУРАМ');
+  }
+  renderTrendBlock(sheet, LAYOUT.TREND.row, trendRuns, effectiveStabilityRows, effectiveRoutes);
+  renderWorstPagesBlock(sheet, LAYOUT.WORST_PAGES.row, effectiveRoutes, thresholds, 'БЛОК 6 — ХУДШИЕ СТРАНИЦЫ');
+  renderDeviceSplitBlock(sheet, LAYOUT.DEVICE_SPLIT.row, effectiveRoutes, thresholds, 'БЛОК 7 — DESKTOP VS MOBILE');
+  renderDiagnosticsBlock(sheet, LAYOUT.DIAGNOSTICS.row, context.latest, thresholds);
+  renderRouteHealthBlock(sheet, LAYOUT.ROUTE_HEALTH.row, effectiveRoutes, stabilityMap, thresholds);
+  if (mode === 'EXPERIMENT') {
+    renderExperimentsBlock(sheet, LAYOUT.EXPERIMENTS.row, effectiveRuns, thresholds);
+  }
+}
+
+function readSprintMetadata(sheet) {
+  const rollout = {
+    DEV: safeReadCell_(sheet, SPRINT_METADATA_CELLS.devDone) === true,
+    TEST: safeReadCell_(sheet, SPRINT_METADATA_CELLS.testDone) === true,
+    STAGE: safeReadCell_(sheet, SPRINT_METADATA_CELLS.stageDone) === true,
+    PROD: safeReadCell_(sheet, SPRINT_METADATA_CELLS.prodDone) === true,
+  };
+  const checkedCount = Object.values(rollout).filter(Boolean).length;
+  const currentSprint = toText(safeReadCell_(sheet, SPRINT_METADATA_CELLS.currentSprint)).trim();
+  const previousIncrement = toText(safeReadCell_(sheet, SPRINT_METADATA_CELLS.nextSprint)).trim();
+  const hasAnyRollout = checkedCount > 0;
+  return {
+    currentSprint,
+    previousIncrement,
+    rollout,
+    checkedCount,
+    hasAnyRollout,
+    activeSprint: currentSprint || previousIncrement,
+  };
+}
+
+function normalizeDashboardMode_(value) {
+  const text = toText(value).trim().toUpperCase();
+  if (text === 'SPRINT VIEW') return 'SPRINT';
+  if (text === 'ENVIRONMENT VIEW') return 'ENVIRONMENT';
+  if (text === 'ROUTE CROSS-ENV') return 'ROUTE_CROSS_ENV';
+  if (text === 'EXPERIMENT') return 'EXPERIMENT';
+  return 'ENVIRONMENT';
+}
+
+function getSprintTagForEnvironment_(environment, sprintConfig) {
+  if (!sprintConfig || !sprintConfig.hasAnyRollout) {
+    return '';
+  }
+  const env = normalizeEnvironment(environment);
+  return sprintConfig.rollout[env] ? 'after' : 'before';
+}
+
+function matchesSprintContext_(record, sprintConfig) {
+  if (!sprintConfig || !sprintConfig.activeSprint) {
+    return true;
+  }
+  if (toText(record.sprint).trim() !== sprintConfig.activeSprint) {
+    return false;
+  }
+  if (!sprintConfig.hasAnyRollout) {
+    return true;
+  }
+  return toText(record.tag).trim().toLowerCase() === getSprintTagForEnvironment_(record.environment, sprintConfig);
 }
 
 function ensurePerfAnalyticsTriggers(ss) {
   const handler = 'updatePerfAnalytics';
   const triggers = ScriptApp.getProjectTriggers();
-  const hasEdit = triggers.some(trigger => trigger.getHandlerFunction() === handler && trigger.getEventType() === ScriptApp.EventType.ON_EDIT);
-  if (!hasEdit) {
-    ScriptApp.newTrigger(handler).forSpreadsheet(ss).onEdit().create();
+  triggers
+    .filter(trigger => trigger.getHandlerFunction() === handler && trigger.getEventType() === ScriptApp.EventType.ON_EDIT)
+    .forEach(trigger => ScriptApp.deleteTrigger(trigger));
+  triggers
+    .filter(trigger => trigger.getHandlerFunction() === 'handleDashboardButtonEdit')
+    .forEach(trigger => ScriptApp.deleteTrigger(trigger));
+  triggers
+    .filter(trigger => trigger.getHandlerFunction() === handler && trigger.getEventType() === ScriptApp.EventType.CLOCK)
+    .forEach(trigger => ScriptApp.deleteTrigger(trigger));
+}
+
+function rebuildAnalyticsHelperSheets(ss) {
+  const rawRows = collectRawPerfRows(ss);
+  rebuildRunsSheet(ss, rawRows);
+  rebuildRoutesSheet(ss, rawRows);
+  rebuildStabilitySheet(ss, rawRows);
+}
+
+function collectRawPerfRows(ss) {
+  const rows = [];
+  RAW_PERF_SHEETS.forEach(sheetName => {
+    const sheet = ss.getSheetByName(sheetName);
+    if (!sheet) {
+      return;
+    }
+    const records = readSheetRecords(sheet);
+    records.forEach(record => {
+      const normalized = normalizeRawRecord(record, sheetName);
+      if (normalized) {
+        rows.push(normalized);
+      }
+    });
+  });
+  return rows;
+}
+
+function normalizeRawRecord(record, sheetName) {
+  const page = toText(getRecordValue(record, ['page']));
+  const device = toText(getRecordValue(record, ['device'])) || 'unknown';
+  if (!page && sheetName !== 'CrUX') {
+    return null;
   }
-  const hasClock = triggers.some(trigger => trigger.getHandlerFunction() === handler && trigger.getEventType() === ScriptApp.EventType.CLOCK);
-  if (!hasClock) {
-    ScriptApp.newTrigger(handler).timeBased().everyHours(2).create();
+  const sheetMeta = inferMetaFromSheetName(sheetName);
+  const environmentRaw = toText(getRecordValue(record, ['environment'])) || sheetMeta.environment;
+  const projectRaw = toText(getRecordValue(record, ['project'])) || sheetMeta.project || inferProject(environmentRaw);
+  const sourceRaw = getRecordValue(record, ['source', 'type']) || sheetMeta.source;
+  return {
+    date: toText(getRecordValue(record, ['date'])),
+    project: normalizeProject(projectRaw),
+    environment: normalizeEnvironment(environmentRaw),
+    source: normalizeSource(sourceRaw),
+    sprint: toText(getRecordValue(record, ['sprint'])),
+    runId: toText(getRecordValue(record, ['run_id'])),
+    tag: toText(getRecordValue(record, ['tag'])),
+    iterations: parseNumber(getRecordValue(record, ['iterations'])) || inferIterationsFromType(getRecordValue(record, ['type'])) || (sheetName === 'CrUX' ? 1 : null),
+    page,
+    device,
+    type: ROUTE_TYPE_MAP[page] || 'route',
+    avgScore: parseNumber(getRecordValue(record, ['p', 'avg_score', 'score'])),
+    lcp: normalizeTiming(getRecordValue(record, ['lcp_p90', 'p90_lcp', 'lcp']), 'lcp'),
+    inp: normalizeTiming(getRecordValue(record, ['inp_p90', 'p90_inp', 'inp']), 'inp'),
+    cls: parseNumber(getRecordValue(record, ['cls_p90', 'p90_cls', 'cls'])),
+    ttfb: normalizeTiming(getRecordValue(record, ['ttfb', 'avg_ttfb', 'ttfb_avg']), 'ttfb'),
+    tbt: normalizeTiming(getRecordValue(record, ['tbt', 'total_blocking_time']), 'tbt'),
+    fcp: normalizeTiming(getRecordValue(record, ['fcp', 'first_contentful_paint']), 'fcp'),
+    tti: normalizeTiming(getRecordValue(record, ['tti', 'time_to_interactive']), 'tti'),
+    speed: normalizeTiming(getRecordValue(record, ['si', 'speed', 'speed_index']), 'speed'),
+  };
+}
+
+function inferMetaFromSheetName(sheetName) {
+  const text = toText(sheetName).toUpperCase();
+  if (text === 'CRUX') {
+    return { project: '', environment: 'PROD', source: 'CRUX' };
   }
+  const match = text.match(/^(VRP|VRS)\s*\[(PROD|STAGE|TEST|DEV)\]$/);
+  if (!match) {
+    return { project: '', environment: '', source: '' };
+  }
+  return { project: match[1], environment: match[2], source: '' };
+}
+
+function inferIterationsFromType(typeValue) {
+  const text = toText(typeValue);
+  const match = text.match(/\{(\d+)\}/);
+  return match ? parseInt(match[1], 10) : null;
+}
+
+function rebuildRunsSheet(ss, rows) {
+  const sheet = getOrCreateSheet(ss, RUNS_SHEET);
+  const grouped = {};
+  rows.forEach(row => {
+    const key = [row.project, row.environment, row.source, row.sprint, row.tag, row.runId].join('|');
+    if (!grouped[key]) {
+      grouped[key] = [];
+    }
+    grouped[key].push(row);
+  });
+  const data = Object.values(grouped).map(group => buildRunAggregateRow(group));
+  writeHelperSheet(sheet, RUNS_HEADERS, data);
+}
+
+function buildRunAggregateRow(group) {
+  const sample = group[group.length - 1] || {};
+  const pages = new Set(group.map(item => `${item.page}|${item.device}`)).size;
+  return [
+    sample.date || '',
+    sample.project || '',
+    sample.environment || '',
+    sample.source || '',
+    sample.sprint || '',
+    sample.runId || '',
+    sample.tag || '',
+    sample.iterations || '',
+    pages,
+    averageNumbers(group.map(item => item.avgScore), 0),
+    averageNumbers(group.map(item => item.lcp), 0),
+    averageNumbers(group.map(item => item.inp), 0),
+    averageNumbers(group.map(item => item.cls), 3),
+    averageNumbers(group.map(item => item.ttfb), 0),
+    averageNumbers(group.map(item => item.tbt), 0),
+    averageNumbers(group.map(item => item.fcp), 0),
+    averageNumbers(group.map(item => item.tti), 0),
+    averageNumbers(group.map(item => item.speed), 0),
+  ];
+}
+
+function rebuildRoutesSheet(ss, rows) {
+  const sheet = getOrCreateSheet(ss, ROUTES_SHEET);
+  const grouped = {};
+  rows.forEach(row => {
+    const key = [row.project, row.environment, row.source, row.sprint, row.tag, row.runId, row.page, row.device].join('|');
+    if (!grouped[key]) {
+      grouped[key] = [];
+    }
+    grouped[key].push(row);
+  });
+  const data = Object.values(grouped).map(group => buildRouteAggregateRow(group));
+  writeHelperSheet(sheet, ROUTES_HEADERS, data);
+}
+
+function buildRouteAggregateRow(group) {
+  const sample = group[group.length - 1] || {};
+  return [
+    sample.date || '',
+    sample.project || '',
+    sample.environment || '',
+    sample.source || '',
+    sample.sprint || '',
+    sample.runId || '',
+    sample.tag || '',
+    sample.page || '',
+    sample.device || '',
+    sample.type || 'route',
+    sample.iterations || '',
+    averageNumbers(group.map(item => item.avgScore), 0),
+    averageNumbers(group.map(item => item.lcp), 0),
+    averageNumbers(group.map(item => item.inp), 0),
+    averageNumbers(group.map(item => item.cls), 3),
+    averageNumbers(group.map(item => item.ttfb), 0),
+  ];
+}
+
+function rebuildStabilitySheet(ss, rows) {
+  const sheet = getOrCreateSheet(ss, STABILITY_SHEET);
+  const grouped = {};
+  rows.forEach(row => {
+    const key = [row.project, row.environment, row.source, row.page, row.device].join('|');
+    if (!grouped[key]) {
+      grouped[key] = [];
+    }
+    grouped[key].push(row);
+  });
+  const data = Object.values(grouped).map(group => buildStabilityAggregateRow(group));
+  writeHelperSheet(sheet, STABILITY_HEADERS, data);
+}
+
+function buildStabilityAggregateRow(group) {
+  const sample = group[group.length - 1] || {};
+  const lcpStd = computeStdDev(group.map(item => item.lcp), 0);
+  const inpStd = computeStdDev(group.map(item => item.inp), 0);
+  const clsStd = computeStdDev(group.map(item => item.cls), 3);
+  const stabilityScore = computeStabilityScore(lcpStd, inpStd, clsStd);
+  return [
+    sample.project || '',
+    sample.environment || '',
+    sample.source || '',
+    sample.page || '',
+    sample.device || '',
+    lcpStd,
+    inpStd,
+    clsStd,
+    stabilityScore,
+  ];
+}
+
+function writeHelperSheet(sheet, headers, rows) {
+  sheet.clearContents();
+  const output = [headers].concat(rows || []);
+  sheet.getRange(1, 1, output.length, headers.length).setValues(output);
+}
+
+function averageNumbers(values, decimals) {
+  const nums = values.map(parseNumber).filter(value => value !== null);
+  if (!nums.length) {
+    return '';
+  }
+  const avg = nums.reduce((sum, value) => sum + value, 0) / nums.length;
+  return decimals > 0 ? parseFloat(avg.toFixed(decimals)) : Math.round(avg);
+}
+
+function computeStdDev(values, decimals) {
+  const nums = values.map(parseNumber).filter(value => value !== null);
+  if (nums.length < 2) {
+    return 0;
+  }
+  const mean = nums.reduce((sum, value) => sum + value, 0) / nums.length;
+  const variance = nums.reduce((sum, value) => sum + Math.pow(value - mean, 2), 0) / nums.length;
+  const std = Math.sqrt(variance);
+  return decimals > 0 ? parseFloat(std.toFixed(decimals)) : Math.round(std);
+}
+
+function computeStabilityScore(lcpStd, inpStd, clsStd) {
+  const lcpPenalty = Math.min((parseNumber(lcpStd) || 0) / 100, 40);
+  const inpPenalty = Math.min((parseNumber(inpStd) || 0) / 20, 30);
+  const clsPenalty = Math.min((parseNumber(clsStd) || 0) * 100, 30);
+  const score = 100 - lcpPenalty - inpPenalty - clsPenalty;
+  return Math.max(0, Math.min(100, Math.round(score)));
 }
 
 function getOrCreateSheet(ss, name) {
@@ -102,8 +478,179 @@ function getOrCreateSheet(ss, name) {
   return sheet;
 }
 
-function showEmptyMessage(sheet) {
-  sheet.getRange('A1').setValue('Данных ещё нет, запусти проверки Lighthouse и обнови дашборд.').setFontSize(14).setFontWeight('bold');
+function showEmptyMessage(sheet, project) {
+  clearDashboardRenderArea(sheet);
+  const sprintConfig = readSprintMetadata(sheet);
+  prepareDashboardControls(sheet, project, buildDefaultFilters(project, [], [], sprintConfig), [], sprintConfig);
+  const prefix = project ? `${project}: ` : '';
+  sheet.getRange(CONTROL_RENDER_START_ROW, 1).setValue(`${prefix}данных ещё нет, запусти проверки Lighthouse и обнови дашборд.`).setFontSize(14).setFontWeight('bold');
+}
+
+function clearDashboardRenderArea(sheet) {
+  sheet.getCharts().forEach(chart => sheet.removeChart(chart));
+  const maxRows = Math.max(sheet.getMaxRows() - CONTROL_RENDER_START_ROW + 1, 1);
+  const maxCols = Math.max(sheet.getMaxColumns(), 40);
+  sheet.getRange(CONTROL_RENDER_START_ROW, 1, maxRows, maxCols).clearContent().clearFormat();
+}
+
+function clearDashboardControlArea(sheet) {
+  const controlRange = sheet.getRange(1, 1, CONTROL_RENDER_START_ROW - 1, 12);
+  try {
+    controlRange.breakApart();
+  } catch (error) {
+  }
+  controlRange.clearContent().clearFormat().clearDataValidations();
+}
+
+function prepareDashboardControls(sheet, project, filters, runs, sprintConfig) {
+  clearDashboardControlArea(sheet);
+  const latest = runs.length ? runs[runs.length - 1] : null;
+  const titleRange = sheet.getRange(1, 1, 1, 8);
+  titleRange.merge();
+  titleRange.setValue(`Performance QA Dashboard [${project}]`);
+  titleRange.setFontWeight('bold').setFontSize(16).setBackground(BLOCK_HEADER_COLOR).setFontColor(BLOCK_HEADER_FONT_COLOR).setHorizontalAlignment('center');
+  const subtitle = [`Default env: PROD`];
+  if (sprintConfig && sprintConfig.currentSprint) subtitle.push(`Current sprint: ${sprintConfig.currentSprint}`);
+  if (sprintConfig && sprintConfig.previousIncrement) subtitle.push(`Previous increment: ${sprintConfig.previousIncrement}`);
+  if (!subtitle.length && latest && latest.sprint) subtitle.push(`Latest sprint: ${latest.sprint}`);
+  sheet.getRange(2, 1, 1, 8).merge();
+  sheet.getRange(2, 1).setValue(subtitle.join(' | ')).setFontStyle('italic').setFontColor('#455A64');
+
+  const labels = ['Environment', 'Device', 'Route', 'Sprint', 'Tag', 'Mode'];
+  const values = [
+    filters.environment || 'PROD',
+    filters.device || 'ALL',
+    filters.route || 'ALL',
+    filters.sprint || 'ALL',
+    filters.tag || 'ALL',
+    filters.mode || 'Environment View',
+  ];
+  sheet.getRange(4, 1, labels.length, 1).setValues(labels.map(item => [item])).setFontWeight('bold').setBackground('#ECEFF1');
+  sheet.getRange(4, 2, values.length, 1).setValues(values.map(item => [item])).setBackground('#FAFAFA');
+
+  const environments = ['PROD', 'STAGE', 'TEST', 'DEV', 'ALL'];
+  const devices = ['ALL', 'mobile', 'desktop'];
+  const routes = ['ALL'].concat(uniqueNonEmptyValues_(runs.map(item => item.page)).sort());
+  const sprints = ['ALL'].concat(uniqueNonEmptyValues_(runs.map(item => item.sprint)).sort().reverse());
+  const tags = ['ALL'].concat(uniqueNonEmptyValues_(runs.map(item => item.tag)).sort());
+  const modes = ['Environment View', 'Sprint View', 'Route Cross-Env', 'Experiment'];
+  applyDropdown_(sheet.getRange('B4'), environments);
+  applyDropdown_(sheet.getRange('B5'), devices);
+  applyDropdown_(sheet.getRange('B6'), routes.length ? routes : ['ALL']);
+  applyDropdown_(sheet.getRange('B7'), sprints.length ? sprints : ['ALL']);
+  applyDropdown_(sheet.getRange('B8'), tags.length ? tags : ['ALL']);
+  applyDropdown_(sheet.getRange('B9'), modes);
+
+  sheet.getRange(4, 4, 1, 4).merge();
+  sheet.getRange(4, 4).setValue(`Sprint Control [${project}]`).setFontWeight('bold').setBackground('#ECEFF1');
+  sheet.getRange(5, 4, 2, 1).setValues([['Current Sprint'], ['Previous Increment']]).setFontWeight('bold').setBackground('#ECEFF1');
+  sheet.getRange(5, 5, 2, 1).setValues([
+    [sprintConfig && sprintConfig.currentSprint ? sprintConfig.currentSprint : ''],
+    [sprintConfig && sprintConfig.previousIncrement ? sprintConfig.previousIncrement : ''],
+  ]).setBackground('#FAFAFA');
+  sheet.getRange(8, 4, 1, 4).setValues([['DEV', 'TEST', 'STAGE', 'PROD']]).setFontWeight('bold').setBackground('#ECEFF1');
+  const rolloutRange = sheet.getRange(9, 4, 1, 4);
+  rolloutRange.insertCheckboxes();
+  rolloutRange.setValues([[
+    sprintConfig && sprintConfig.rollout && sprintConfig.rollout.DEV ? true : false,
+    sprintConfig && sprintConfig.rollout && sprintConfig.rollout.TEST ? true : false,
+    sprintConfig && sprintConfig.rollout && sprintConfig.rollout.STAGE ? true : false,
+    sprintConfig && sprintConfig.rollout && sprintConfig.rollout.PROD ? true : false,
+  ]]);
+  sheet.getRange(10, 4, 1, 4).merge();
+  sheet.getRange(10, 4).setValue(buildSprintSummary_(sprintConfig)).setFontStyle('italic').setFontColor('#455A64');
+  sheet.getRange(11, 4, 2, 4).merge();
+  sheet.getRange(11, 4).setValue('Sprint View: работаем по Current Sprint. Контур с чекбоксом = after, без чекбокса = before. Previous Increment хранится как справочный прошлый инкремент.').setWrap(true).setFontColor('#607D8B');
+  sheet.getRange(13, 1, 2, 12).clearContent().clearFormat().clearDataValidations();
+  sheet.getRange('D13:H14').merge();
+  sheet.getRange('D13:H14').setBackground('#ECEFF1').setFontColor('#455A64').setHorizontalAlignment('center').setVerticalAlignment('middle').setFontStyle('italic');
+  sheet.getRange('D13:H14').setValue('Generate Dashboard: нажми кнопку справа или используй меню QA Dashboard');
+  ensureGenerateDashboardButton_(sheet);
+  sheet.setFrozenRows(3);
+}
+
+function ensureGenerateDashboardButton_(sheet) {
+  const anchor = GENERATE_BUTTON_ANCHOR;
+  sheet.getImages()
+    .filter(image => {
+      const cell = image.getAnchorCell();
+      return cell && cell.getRow() === anchor.row && cell.getColumn() === anchor.column;
+    })
+    .forEach(image => image.remove());
+
+  const image = sheet.insertImage(
+    Utilities.newBlob(Utilities.base64Decode(GENERATE_BUTTON_PNG_BASE64), 'image/png', 'generate-dashboard.png'),
+    anchor.column,
+    anchor.row,
+    anchor.offsetX,
+    anchor.offsetY,
+  );
+  image.assignScript('updatePerfAnalytics');
+  image.setWidth(anchor.width);
+  image.setHeight(anchor.height);
+}
+
+function buildSprintSummary_(sprintConfig) {
+  if (!sprintConfig) {
+    return 'Sprint context is empty.';
+  }
+  if (!sprintConfig.hasAnyRollout) {
+    return `Active sprint: ${sprintConfig.currentSprint || '—'} | rollout не начат`;
+  }
+  return `Active sprint: ${sprintConfig.currentSprint || '—'} | rollout progress: ${sprintConfig.checkedCount}/4`;
+}
+
+function applyDropdown_(range, values) {
+  const rule = SpreadsheetApp.newDataValidation()
+    .requireValueInList(values, true)
+    .setAllowInvalid(true)
+    .build();
+  range.setDataValidation(rule);
+}
+
+function uniqueNonEmptyValues_(values) {
+  return Array.from(new Set(values.map(toText).map(item => item.trim()).filter(Boolean)));
+}
+
+function shouldRenderCrossEnvBlock(filters) {
+  const mode = normalizeDashboardMode_(filters.mode);
+  const environment = toText(filters.environment).trim().toUpperCase();
+  if (mode === 'ENVIRONMENT') {
+    return !environment || environment === 'ALL';
+  }
+  return mode === 'SPRINT' || mode === 'ROUTE_CROSS_ENV' || mode === 'EXPERIMENT';
+}
+
+function getPerfSpreadsheet() {
+  const active = SpreadsheetApp.getActiveSpreadsheet();
+  if (active) {
+    return active;
+  }
+  const spreadsheetId = getPerfConfiguredSpreadsheetId();
+  if (!spreadsheetId) {
+    throw new Error(
+      'Не удалось получить Spreadsheet для дашборда. Установи GS_SHEET_ID/SHEET_ID в свойствах скрипта.'
+    );
+  }
+  return SpreadsheetApp.openById(spreadsheetId);
+}
+
+function getPerfConfiguredSpreadsheetId() {
+  const scriptProps = PropertiesService.getScriptProperties();
+  for (const key of PERF_SHEET_ID_KEYS) {
+    const value = scriptProps.getProperty(key);
+    if (value) {
+      return value;
+    }
+  }
+  const docProps = PropertiesService.getDocumentProperties();
+  for (const key of PERF_SHEET_ID_KEYS) {
+    const value = docProps.getProperty(key);
+    if (value) {
+      return value;
+    }
+  }
+  return null;
 }
 
 function autoSizeColumns(sheet) {
@@ -189,10 +736,19 @@ function extractRunMetrics(record) {
   if (!runId && !date) {
     return null;
   }
+  const environmentRaw = toText(getRecordValue(record, ['environment']));
+  const projectRaw = toText(getRecordValue(record, ['project'])) || inferProject(environmentRaw);
+  const environment = normalizeEnvironment(environmentRaw);
+  const source = normalizeSource(getRecordValue(record, ['source', 'type']));
   return {
     runId,
     date,
+    project: normalizeProject(projectRaw),
+    environment,
+    source,
+    sprint: toText(getRecordValue(record, ['sprint'])),
     tag: toText(getRecordValue(record, ['tag'])),
+    iterations: parseNumber(getRecordValue(record, ['iterations'])),
     pages: parseNumber(getRecordValue(record, ['pages'])),
     avgScore: parseNumber(getRecordValue(record, ['avg_score', 'score'])),
     lcp: normalizeTiming(getRecordValue(record, ['p90_lcp', 'lcp_p90', 'lcp']), 'lcp'),
@@ -232,19 +788,72 @@ function toText(value) {
   return value.toString();
 }
 
+function normalizeProject(value) {
+  const text = toText(value).toUpperCase();
+  if (text.startsWith('VRP')) {
+    return 'VRP';
+  }
+  if (text.startsWith('VRS')) {
+    return 'VRS';
+  }
+  return text;
+}
+
+function normalizeEnvironment(value) {
+  const text = toText(value).toUpperCase();
+  if (!text) {
+    return '';
+  }
+  if (text.includes('PROD')) return 'PROD';
+  if (text.includes('STAGE')) return 'STAGE';
+  if (text.includes('TEST')) return 'TEST';
+  if (text.includes('DEV')) return 'DEV';
+  return text;
+}
+
+function inferProject(environment) {
+  const text = toText(environment).toUpperCase();
+  if (text.startsWith('VRP')) return 'VRP';
+  if (text.startsWith('VRS')) return 'VRS';
+  return '';
+}
+
+function normalizeSource(value) {
+  const text = toText(value).toUpperCase();
+  if (!text) {
+    return '';
+  }
+  if (text.includes('CRUX')) return 'CRUX';
+  if (text.includes('API')) return 'API';
+  if (text.includes('CLI')) return 'CLI';
+  return text;
+}
+
+function matchesProject(value, project) {
+  return normalizeProject(value) === normalizeProject(project);
+}
+
 function parseRouteRecord(record) {
   const page = toText(getRecordValue(record, ['page']));
   if (!page) {
     return null;
   }
   const device = toText(getRecordValue(record, ['device'])) || 'unknown';
+  const environmentRaw = toText(getRecordValue(record, ['environment']));
   return {
     page,
     device,
+    project: normalizeProject(toText(getRecordValue(record, ['project'])) || inferProject(environmentRaw)),
+    environment: normalizeEnvironment(environmentRaw),
+    source: normalizeSource(getRecordValue(record, ['source', 'type'])),
+    sprint: toText(getRecordValue(record, ['sprint'])),
+    tag: toText(getRecordValue(record, ['tag'])),
+    iterations: parseNumber(getRecordValue(record, ['iterations'])),
     avgScore: parseNumber(getRecordValue(record, ['avg_score'])),
     lcp: normalizeTiming(getRecordValue(record, ['p90_lcp', 'lcp_p90', 'lcp']), 'lcp'),
     inp: normalizeTiming(getRecordValue(record, ['p90_inp', 'inp_p90', 'inp']), 'inp'),
     cls: parseNumber(getRecordValue(record, ['p90_cls', 'cls_p90', 'cls'])),
+    ttfb: normalizeTiming(getRecordValue(record, ['ttfb', 'avg_ttfb', 'ttfb_avg']), 'ttfb'),
     tests: parseNumber(getRecordValue(record, ['tests'])),
     type: ROUTE_TYPE_MAP[page] || 'route',
   };
@@ -256,9 +865,18 @@ function parseStabilityRecord(record) {
   if (!page || !device) {
     return null;
   }
+  const environmentRaw = toText(getRecordValue(record, ['environment']));
+  const project = normalizeProject(toText(getRecordValue(record, ['project'])) || inferProject(environmentRaw));
+  const environment = normalizeEnvironment(environmentRaw);
+  const source = normalizeSource(getRecordValue(record, ['source', 'type']));
   const deviceKey = device.toLowerCase();
   return {
-    key: `${page}|${deviceKey}`,
+    page,
+    device,
+    project,
+    environment,
+    source,
+    key: buildStabilityKey(project, environment, source, page, deviceKey),
     lcpStd: parseNumber(getRecordValue(record, ['lcp_std'])),
     inpStd: parseNumber(getRecordValue(record, ['inp_std'])),
     clsStd: parseNumber(getRecordValue(record, ['cls_std'])),
@@ -276,7 +894,14 @@ function buildStabilityMap(records) {
   return map;
 }
 
+function buildStabilityKey(project, environment, source, page, device) {
+  return [normalizeProject(project), normalizeEnvironment(environment), normalizeSource(source), toText(page), toText(device).toLowerCase()].join('|');
+}
+
 function loadMetricThresholds(ss) {
+  if (!ss) {
+    return populateFallbackThresholds({});
+  }
   const sheet = ss.getSheetByName(DASHBOARD_CONFIG_SHEET);
   const metrics = {};
   if (!sheet) {
@@ -287,10 +912,13 @@ function loadMetricThresholds(ss) {
     return populateFallbackThresholds(metrics);
   }
   const headers = values[0].map(normalizeHeader);
-  const metricIdx = headers.indexOf('metric');
-  const goodIdx = headers.indexOf('good');
-  const poorIdx = headers.indexOf('poor');
-  const directionIdx = headers.indexOf('direction');
+  const metricIdx = findHeaderIndex(headers, ['metric']);
+  const goodIdx = findHeaderIndex(headers, ['good', 'good_', 'good__', 'good_threshold', 'green', 'green_threshold', 'expected']);
+  const poorIdx = findHeaderIndex(headers, ['poor', 'poor_', 'poor__', 'poor_threshold', 'red', 'red_threshold', 'bad']);
+  const directionIdx = findHeaderIndex(headers, ['direction', 'trend', 'mode']);
+  if (metricIdx === -1 || goodIdx === -1 || poorIdx === -1) {
+    return populateFallbackThresholds(metrics);
+  }
   for (let i = 1; i < values.length; i++) {
     const row = values[i];
     const metricName = row[metricIdx];
@@ -301,10 +929,20 @@ function loadMetricThresholds(ss) {
     metrics[key] = {
       good: parseNumber(row[goodIdx]),
       poor: parseNumber(row[poorIdx]),
-      direction: row[directionIdx] ? row[directionIdx].toString().trim().toLowerCase() : 'low_good',
+      direction: directionIdx !== -1 && row[directionIdx] ? row[directionIdx].toString().trim().toLowerCase() : 'low_good',
     };
   }
   return populateFallbackThresholds(metrics);
+}
+
+function findHeaderIndex(headers, candidates) {
+  for (const candidate of candidates) {
+    const index = headers.indexOf(normalizeHeader(candidate));
+    if (index !== -1) {
+      return index;
+    }
+  }
+  return -1;
 }
 
 function populateFallbackThresholds(base) {
@@ -320,6 +958,12 @@ function populateFallbackThresholds(base) {
     }
   });
   return result;
+}
+
+function colorMetricCell_(sheet, row, column, metricKey, value, thresholds) {
+  const status = assessMetricStatus(metricKey, value, thresholds);
+  sheet.getRange(row, column).setBackground(status.color);
+  return status;
 }
 
 function assessMetricStatus(metricKey, value, thresholds) {
@@ -384,17 +1028,481 @@ function formatPercent(value) {
   return `${sign}${value.toFixed(1)}%`;
 }
 
-function renderTitleBlock(sheet, row) {
+function renderTitleBlockLegacy(sheet, row, project, latest) {
   const range = sheet.getRange(row, 1, 1, 6);
   range.merge();
-  range.setValue('Performance QA Dashboard');
+  range.setValue(`Performance QA Dashboard [${project}]`);
   range.setFontWeight('bold');
   range.setFontSize(16);
   range.setBackground(BLOCK_HEADER_COLOR);
   range.setFontColor(BLOCK_HEADER_FONT_COLOR);
   range.setHorizontalAlignment('center');
   sheet.setRowHeight(row, 32);
-  return row + 2;
+  const subtitle = [`Project: ${project}`];
+  if (latest && latest.environment) subtitle.push(`Env: ${latest.environment}`);
+  if (latest && latest.source) subtitle.push(`Source: ${latest.source}`);
+  if (latest && latest.sprint) subtitle.push(`Sprint: ${latest.sprint}`);
+  sheet.getRange(row + 1, 1, 1, 8).merge();
+  sheet.getRange(row + 1, 1).setValue(subtitle.join(' | ')).setFontStyle('italic').setFontColor('#455A64');
+  return row + 3;
+}
+
+function readDashboardFilters(sheet, project, runs, routes, sprintConfig) {
+  const defaults = buildDefaultFilters(project, runs, routes, sprintConfig);
+  const filterMap = [
+    ['environment', 'B4'],
+    ['device', 'B5'],
+    ['route', 'B6'],
+    ['sprint', 'B7'],
+    ['tag', 'B8'],
+    ['mode', 'B9'],
+  ];
+  const result = Object.assign({}, defaults);
+  filterMap.forEach(([key, cell]) => {
+    const value = safeReadCell_(sheet, cell);
+    if (value) {
+      result[key] = value.toString().trim();
+    }
+  });
+  return result;
+}
+
+function buildDefaultFilters(project, runs, routes, sprintConfig) {
+  const latest = runs[runs.length - 1] || {};
+  return {
+    project,
+    environment: latest.environment || 'PROD',
+    device: 'ALL',
+    route: 'ALL',
+    sprint: (sprintConfig && sprintConfig.activeSprint) || latest.sprint || 'ALL',
+    tag: 'ALL',
+    source: 'ALL',
+    mode: 'Environment View',
+  };
+}
+
+function safeReadCell_(sheet, a1) {
+  try {
+    return sheet.getRange(a1).getValue();
+  } catch (error) {
+    return '';
+  }
+}
+
+function filterMatchesValue(actual, expected) {
+  const wanted = toText(expected).trim();
+  if (!wanted || wanted.toUpperCase() === 'ALL') {
+    return true;
+  }
+  return toText(actual).trim().toUpperCase() === wanted.toUpperCase();
+}
+
+function applyRunFilters(runs, filters, sprintConfig) {
+  const mode = normalizeDashboardMode_(filters.mode);
+  return runs.filter(run => {
+    if (!filterMatchesValue(run.source, filters.source)) {
+      return false;
+    }
+    if (mode === 'SPRINT') {
+      return matchesSprintContext_(run, sprintConfig);
+    }
+    if (mode === 'ENVIRONMENT') {
+      return filterMatchesValue(run.environment, filters.environment);
+    }
+    return filterMatchesValue(run.environment, filters.environment)
+      && filterMatchesValue(run.sprint, filters.sprint)
+      && filterMatchesValue(run.tag, filters.tag);
+  });
+}
+
+function applyRouteFilters(routes, filters, sprintConfig) {
+  const mode = normalizeDashboardMode_(filters.mode);
+  return routes.filter(route => {
+    if (!filterMatchesValue(route.source, filters.source)) {
+      return false;
+    }
+    if (!filterMatchesValue(route.device, filters.device)) {
+      return false;
+    }
+    if (!filterMatchesValue(route.page, filters.route)) {
+      return false;
+    }
+    if (mode === 'SPRINT') {
+      return matchesSprintContext_(route, sprintConfig);
+    }
+    if (mode === 'ENVIRONMENT') {
+      return filterMatchesValue(route.environment, filters.environment);
+    }
+    return filterMatchesValue(route.environment, filters.environment)
+      && filterMatchesValue(route.sprint, filters.sprint)
+      && filterMatchesValue(route.tag, filters.tag);
+  });
+}
+
+function applyStabilityFilters(records, filters) {
+  return records.filter(item => {
+    return filterMatchesValue(item.environment, filters.environment)
+      && filterMatchesValue(item.source, filters.source)
+      && filterMatchesValue(item.device, filters.device)
+      && filterMatchesValue(item.page, filters.route);
+  });
+}
+
+function getLatestRunForFilters(runs, filters, sprintConfig) {
+  if (!runs.length) {
+    return null;
+  }
+  if (normalizeDashboardMode_(filters.mode) === 'SPRINT') {
+    const scoped = runs.filter(run => matchesSprintContext_(run, sprintConfig));
+    return scoped.length ? scoped[scoped.length - 1] : null;
+  }
+  return runs[runs.length - 1];
+}
+
+function buildContextMetrics(project, filters, latestRun, runs, routes, sprintConfig) {
+  const latest = Object.assign({}, latestRun || {});
+  if (routes.length) {
+    const metrics = aggregateRouteMetrics(routes);
+    if (metrics.lcp !== null) latest.lcp = metrics.lcp;
+    if (metrics.inp !== null) latest.inp = metrics.inp;
+    if (metrics.cls !== null) latest.cls = metrics.cls;
+    if (metrics.ttfb !== null) latest.ttfb = metrics.ttfb;
+    latest.device = filters.device;
+    latest.page = filters.route;
+  }
+  latest.project = project;
+  latest.environment = normalizeDashboardMode_(filters.mode) === 'SPRINT'
+    ? 'ALL'
+    : (filters.environment || latest.environment || 'ALL');
+  latest.source = filters.source || latest.source || 'ALL';
+  latest.sprint = normalizeDashboardMode_(filters.mode) === 'SPRINT'
+    ? ((sprintConfig && sprintConfig.activeSprint) || latest.sprint || 'ALL')
+    : (filters.sprint || latest.sprint || 'ALL');
+  latest.tag = normalizeDashboardMode_(filters.mode) === 'SPRINT'
+    ? 'rollout-based'
+    : (filters.tag || latest.tag || 'ALL');
+  latest.iterations = latest.iterations || 0;
+  return { latest };
+}
+
+function summarizeList_(values, limit = 6) {
+  const items = uniqueNonEmptyValues_(values);
+  if (!items.length) {
+    return '—';
+  }
+  if (items.length <= limit) {
+    return items.join(', ');
+  }
+  return `${items.slice(0, limit).join(', ')} +${items.length - limit}`;
+}
+
+function aggregateRouteMetrics(routes) {
+  if (!routes.length) {
+    return { avgScore: null, lcp: null, inp: null, cls: null, ttfb: null };
+  }
+  const acc = routes.reduce((state, route) => {
+    if (route.avgScore !== null && route.avgScore !== undefined) {
+      state.avgScore += route.avgScore;
+      state.avgScoreCount += 1;
+    }
+    if (route.lcp) {
+      state.lcp += route.lcp;
+      state.lcpCount += 1;
+    }
+    if (route.inp) {
+      state.inp += route.inp;
+      state.inpCount += 1;
+    }
+    if (route.cls !== null && route.cls !== undefined) {
+      state.cls += route.cls;
+      state.clsCount += 1;
+    }
+    if (route.ttfb) {
+      state.ttfb += route.ttfb;
+      state.ttfbCount += 1;
+    }
+    return state;
+  }, { avgScore: 0, lcp: 0, inp: 0, cls: 0, ttfb: 0, avgScoreCount: 0, lcpCount: 0, inpCount: 0, clsCount: 0, ttfbCount: 0 });
+  return {
+    avgScore: acc.avgScoreCount ? Math.round(acc.avgScore / acc.avgScoreCount) : null,
+    lcp: acc.lcpCount ? Math.round(acc.lcp / acc.lcpCount) : null,
+    inp: acc.inpCount ? Math.round(acc.inp / acc.inpCount) : null,
+    cls: acc.clsCount ? parseFloat((acc.cls / acc.clsCount).toFixed(3)) : null,
+    ttfb: acc.ttfbCount ? Math.round(acc.ttfb / acc.ttfbCount) : null,
+  };
+}
+
+function normalizeMetricForChart_(metricKey, value, thresholds) {
+  const num = parseNumber(value);
+  if (num === null) {
+    return 0;
+  }
+  const config = thresholds[normalizeHeader(metricKey)];
+  if (!config) {
+    return num;
+  }
+  const good = parseNumber(config.good);
+  const poor = parseNumber(config.poor);
+  const direction = config.direction || 'low_good';
+  if (good === null || poor === null || good === poor) {
+    return num;
+  }
+  if (direction === 'high_good') {
+    if (num >= good) return 100;
+    if (num <= poor) return 0;
+    return Math.round(((num - poor) / (good - poor)) * 100);
+  }
+  if (num <= good) return 100;
+  if (num >= poor) return 0;
+  return Math.round(((poor - num) / (poor - good)) * 100);
+}
+
+function renderFilterPanelLegacy(sheet, row, filters, runs, routes) {
+  row = renderBlockHeader(sheet, row, 'BLOCK 1 — FILTER PANEL', 4);
+  const latestSprint = filters.sprint || 'ALL';
+  const rows = [
+    ['Environment', filters.environment || 'ALL'],
+    ['Device', filters.device || 'ALL'],
+    ['Route', filters.route || 'ALL'],
+    ['Sprint', latestSprint || 'ALL'],
+    ['Tag', filters.tag || 'ALL'],
+    ['Source', filters.source || 'ALL'],
+    ['Mode', filters.mode || 'Environment View'],
+  ];
+  sheet.getRange(row, 1, rows.length, 2).setValues(rows);
+  sheet.getRange(row, 1, rows.length, 1).setFontWeight('bold').setBackground('#ECEFF1');
+  sheet.getRange(row, 2, rows.length, 1).setBackground('#FAFAFA');
+  sheet.getRange('D5').setValue('Допустимо: ALL или точное значение из raw-данных').setFontStyle('italic').setFontColor('#607D8B');
+  return row + rows.length + 1;
+}
+
+function renderContextOverviewBlock(sheet, row, context, thresholds) {
+  const startRow = row;
+  row = renderBlockHeader(sheet, row, 'BLOCK 2 — CONTEXT OVERVIEW', 4);
+  const latest = context.latest || {};
+  const selected = [
+    latest.environment || 'ALL',
+    latest.source || 'ALL',
+    latest.sprint || 'ALL',
+    latest.tag || 'ALL',
+  ].join(' / ');
+  sheet.getRange(row, 1, 1, 4).merge();
+  sheet.getRange(row, 1).setValue(`Selected: ${selected}`);
+  sheet.getRange(row, 1).setFontWeight('bold');
+  row++;
+  sheet.getRange(row, 1, 1, 3).setValues([['Metric', 'Value', 'Status']]).setFontWeight('bold').setBackground('#ECEFF1');
+  row++;
+  [
+    { label: 'LCP p90', key: 'lcp', value: latest.lcp },
+    { label: 'INP p90', key: 'inp', value: latest.inp },
+    { label: 'CLS p90', key: 'cls', value: latest.cls },
+    { label: 'TTFB avg', key: 'ttfb', value: latest.ttfb },
+  ].forEach(item => {
+    const status = assessMetricStatus(item.key, item.value, thresholds);
+    sheet.getRange(row, 1, 1, 3).setValues([[item.label, formatMetricValue(item.key, item.value), status.status]]);
+    sheet.getRange(row, 3).setBackground(status.color);
+    row++;
+  });
+  return startRow + LAYOUT.CONTEXT.height;
+}
+
+function buildCrossEnvRows(project, filters, runs, routes) {
+  const envOrder = ['DEV', 'TEST', 'STAGE', 'PROD'];
+  const baseRoutes = routes.filter(route => {
+    return filterMatchesValue(route.source, filters.source)
+      && filterMatchesValue(route.device, filters.device)
+      && filterMatchesValue(route.page, filters.route)
+      && filterMatchesValue(route.sprint, filters.sprint)
+      && filterMatchesValue(route.tag, filters.tag);
+  });
+  const baseRuns = runs.filter(run => {
+    return filterMatchesValue(run.source, filters.source)
+      && filterMatchesValue(run.sprint, filters.sprint)
+      && filterMatchesValue(run.tag, filters.tag);
+  });
+  const rows = envOrder.map(environment => {
+    const envRoutes = baseRoutes.filter(route => route.environment === environment);
+    const envRuns = baseRuns.filter(run => run.environment === environment);
+    const routeMetrics = aggregateRouteMetrics(envRoutes);
+    const latestRun = envRuns.length ? envRuns[envRuns.length - 1] : null;
+    return {
+      environment,
+      lcp: routeMetrics.lcp !== null ? routeMetrics.lcp : (latestRun ? latestRun.lcp : null),
+      inp: routeMetrics.inp !== null ? routeMetrics.inp : (latestRun ? latestRun.inp : null),
+      cls: routeMetrics.cls !== null ? routeMetrics.cls : (latestRun ? latestRun.cls : null),
+      ttfb: routeMetrics.ttfb !== null ? routeMetrics.ttfb : (latestRun ? latestRun.ttfb : null),
+    };
+  }).filter(item => item.lcp !== null || item.inp !== null || item.cls !== null || item.ttfb !== null);
+
+  let previousLcp = null;
+  rows.forEach(row => {
+    row.delta = metricDelta(row.lcp, previousLcp);
+    if (row.lcp !== null) {
+      previousLcp = row.lcp;
+    }
+  });
+  return rows;
+}
+
+function buildCrossEnvDeviceRows(filters, runs, routes, sprintConfig) {
+  const envOrder = ['DEV', 'TEST', 'STAGE', 'PROD'];
+  const deviceOrder = ['desktop', 'mobile'];
+  const scopedRoutes = routes.filter(route => {
+    if (!filterMatchesValue(route.source, filters.source)) {
+      return false;
+    }
+    if (!filterMatchesValue(route.page, filters.route)) {
+      return false;
+    }
+    return matchesSprintContext_(route, sprintConfig);
+  });
+  const scopedRuns = runs.filter(run => {
+    if (!filterMatchesValue(run.source, filters.source)) {
+      return false;
+    }
+    return matchesSprintContext_(run, sprintConfig);
+  });
+
+  const rows = [];
+  envOrder.forEach(environment => {
+    deviceOrder.forEach(device => {
+      const envDeviceRoutes = scopedRoutes.filter(route => route.environment === environment && route.device.toLowerCase() === device);
+      if (!envDeviceRoutes.length) {
+        return;
+      }
+      const metrics = aggregateRouteMetrics(envDeviceRoutes);
+      const runIds = uniqueNonEmptyValues_(envDeviceRoutes.map(item => item.runId));
+      const pages = uniqueNonEmptyValues_(envDeviceRoutes.map(item => item.page));
+      const sources = summarizeList_(envDeviceRoutes.map(item => item.source), 3);
+      rows.push({
+        environment,
+        device,
+        incrementStatus: sprintConfig.rollout[environment] ? 'размещён' : 'не размещён',
+        tag: getSprintTagForEnvironment_(environment, sprintConfig) || '—',
+        score: metrics.avgScore,
+        lcp: metrics.lcp,
+        inp: metrics.inp,
+        cls: metrics.cls,
+        ttfb: metrics.ttfb,
+        pagesCount: pages.length,
+        runsCount: runIds.length || scopedRuns.filter(run => run.environment === environment).length,
+        sources,
+        note: `среднее по ${pages.length} стр. / ${runIds.length || 1} зап.`,
+      });
+    });
+  });
+  return rows;
+}
+
+function renderCrossEnvComparisonBlock(sheet, row, project, filters, allRuns, allRoutes, thresholds, title) {
+  const blockTop = row;
+  row = renderBlockHeader(sheet, row, title || 'БЛОК 3 — СРЕЗ ПО КОНТУРАМ', 6);
+  const sprintConfig = readSprintMetadata(sheet);
+  const isSprintMode = normalizeDashboardMode_(filters.mode) === 'SPRINT';
+  const rows = isSprintMode
+    ? buildCrossEnvDeviceRows(filters, allRuns, allRoutes, sprintConfig)
+    : buildCrossEnvRows(project, filters, allRuns, allRoutes);
+  if (!rows.length) {
+    sheet.getRange(row, 1).setValue('Нет данных для cross-env сравнения по текущему фильтру.');
+    return blockTop + LAYOUT.CROSS_ENV.height;
+  }
+  const headers = isSprintMode
+    ? ['Контур', 'Устройство', 'Инкремент', 'Тег', 'P', 'LCP', 'INP', 'CLS', 'TTFB', 'Страниц', 'Запусков', 'Источник']
+    : ['Контур', 'LCP', 'INP', 'CLS', 'TTFB', 'Δ LCP'];
+  sheet.getRange(row, 1, 1, headers.length).setValues([headers]).setFontWeight('bold').setBackground('#ECEFF1');
+  row++;
+  const sprintBlockStartRow = row;
+  rows.forEach(item => {
+    if (isSprintMode) {
+      sheet.getRange(row, 1, 1, 12).setValues([[
+        item.environment,
+        item.device,
+        item.incrementStatus,
+        item.tag,
+        item.score !== null ? item.score : '—',
+        item.lcp || '—',
+        item.inp || '—',
+        item.cls !== null ? item.cls : '—',
+        item.ttfb || '—',
+        item.pagesCount,
+        item.runsCount,
+        item.sources,
+      ]]);
+      colorMetricCell_(sheet, row, 5, 'p', item.score, thresholds);
+      colorMetricCell_(sheet, row, 6, 'lcp', item.lcp, thresholds);
+      colorMetricCell_(sheet, row, 7, 'inp', item.inp, thresholds);
+      colorMetricCell_(sheet, row, 8, 'cls', item.cls, thresholds);
+      colorMetricCell_(sheet, row, 9, 'ttfb', item.ttfb, thresholds);
+    } else {
+      sheet.getRange(row, 1, 1, 6).setValues([[item.environment, item.lcp || '—', item.inp || '—', item.cls !== null ? item.cls : '—', item.ttfb || '—', item.delta !== null ? formatPercent(item.delta) : '—']]);
+      colorMetricCell_(sheet, row, 2, 'lcp', item.lcp, thresholds);
+      colorMetricCell_(sheet, row, 3, 'inp', item.inp, thresholds);
+      colorMetricCell_(sheet, row, 4, 'cls', item.cls, thresholds);
+      colorMetricCell_(sheet, row, 5, 'ttfb', item.ttfb, thresholds);
+    }
+    row++;
+  });
+  if (isSprintMode) {
+    const summaryText = `Комментарий: значения по строке считаются отдельно для пары "контур + устройство". В расчёт вошли только данные текущего Sprint View, число страниц и запусков указано в строке.`;
+    sheet.getRange(row, 1, 1, 12).merge();
+    sheet.getRange(row, 1).setValue(summaryText).setWrap(true).setFontStyle('italic').setFontColor('#546E7A');
+    row++;
+    const chartData = [['Срез', 'P', 'LCP', 'INP', 'CLS', 'TTFB']];
+    rows.forEach(item => {
+      chartData.push([
+        `${item.environment}-${item.device}`,
+        normalizeMetricForChart_('p', item.score, thresholds),
+        normalizeMetricForChart_('lcp', item.lcp, thresholds),
+        normalizeMetricForChart_('inp', item.inp, thresholds),
+        normalizeMetricForChart_('cls', item.cls, thresholds),
+        normalizeMetricForChart_('ttfb', item.ttfb, thresholds),
+      ]);
+    });
+    const helperRow = blockTop;
+    const helperRange = sheet.getRange(helperRow, HELPER_COLUMN_PRIMARY, chartData.length, 6);
+    helperRange.setValues(chartData);
+    insertGroupedBarChart(sheet, helperRange, CHART_ZONES.CROSS_ENV.row, CHART_ZONES.CROSS_ENV.col, 'Метрики по устройствам (0-100)');
+  }
+  if (!isSprintMode) {
+    const chartData = [['Environment', 'LCP']];
+    rows.forEach(item => chartData.push([item.environment, item.lcp || 0]));
+    const helperRow = blockTop;
+    const helperRange = sheet.getRange(helperRow, HELPER_COLUMN_PRIMARY, chartData.length, 2);
+    helperRange.setValues(chartData);
+    insertColumnChart(sheet, helperRange, CHART_ZONES.CROSS_ENV.row, CHART_ZONES.CROSS_ENV.col, 'Cross-env LCP');
+  }
+  return blockTop + LAYOUT.CROSS_ENV.height;
+}
+
+function findLatestCruxForProject(project, cruxRows) {
+  const projectRows = cruxRows.filter(row => matchesProject(row.project, project) && normalizeEnvironment(row.environment) === 'PROD');
+  return projectRows.length ? projectRows[projectRows.length - 1] : null;
+}
+
+function renderCruxReferenceBlock(sheet, row, latest, cruxRows) {
+  const startRow = row;
+  if (!latest || normalizeEnvironment(latest.environment) !== 'PROD') {
+    return startRow + LAYOUT.CRUX_REF.height;
+  }
+  const crux = findLatestCruxForProject(latest.project, cruxRows);
+  if (!crux) {
+    return startRow + LAYOUT.CRUX_REF.height;
+  }
+  row = renderBlockHeader(sheet, row, 'БЛОК 3 — LAB VS FIELD (CrUX 28D)', 4);
+  sheet.getRange(row, 1, 1, 4).setValues([['Метрика', 'LAB current', 'FIELD 28d', 'Delta']]).setFontWeight('bold').setBackground('#ECEFF1');
+  row++;
+  const rows = [
+    ['LCP', latest.lcp, crux.lcp],
+    ['INP', latest.inp, crux.inp],
+    ['CLS', latest.cls, crux.cls],
+    ['TTFB', latest.ttfb, crux.ttfb],
+  ];
+  rows.forEach(item => {
+    const delta = metricDelta(item[1], item[2]);
+    sheet.getRange(row, 1, 1, 4).setValues([[item[0], formatMetricValue(item[0], item[1]), formatMetricValue(item[0], item[2]), delta !== null ? formatPercent(delta) : '—']]);
+    row++;
+  });
+  return startRow + LAYOUT.CRUX_REF.height;
 }
 
 function renderBlockHeader(sheet, row, title, span = 4) {
@@ -410,100 +1518,141 @@ function renderBlockHeader(sheet, row, title, span = 4) {
   return row + 1;
 }
 
-function renderAlertsBlock(sheet, row, latest, previous, routes, stabilityRows) {
-  row = renderBlockHeader(sheet, row, 'BLOCK 0 — ALERTS (AUTO QA)', 4);
-  const alerts = buildAlerts(latest, previous, routes, stabilityRows);
+function renderAlertsBlock(sheet, row, latest, previous, routes, stabilityRows, thresholds, title) {
+  const startRow = row;
+  row = renderBlockHeader(sheet, row, title || 'БЛОК 2 — АЛЕРТЫ', 5);
+  const alerts = buildAlerts(latest, previous, routes, stabilityRows, thresholds);
   if (!alerts.length) {
     sheet.getRange(row, 1).setValue('Нет критичных отклонений — CWV в норме.').setFontStyle('italic');
-    return row + 2;
+    return startRow + LAYOUT.ALERTS.height;
   }
-  sheet.getRange(row, 1, 1, 3).setValues([['Level', 'Alert', 'Reason']]).setFontWeight('bold').setBackground('#ECEFF1');
+  sheet.getRange(row, 1, 1, 5).setValues([['Уровень', 'Контур', 'Устройство', 'Алерт', 'Причина']]).setFontWeight('bold').setBackground('#ECEFF1');
   row++;
   alerts.forEach(alert => {
     sheet.getRange(row, 1).setValue(alert.level).setBackground(ALERT_COLORS[alert.level] || '#FFF3E0');
-    sheet.getRange(row, 2).setValue(alert.text);
-    sheet.getRange(row, 3).setValue(alert.reason);
+    sheet.getRange(row, 2).setValue(alert.environment || '—');
+    sheet.getRange(row, 3).setValue(alert.device || '—');
+    sheet.getRange(row, 4).setValue(alert.text);
+    sheet.getRange(row, 5).setValue(alert.reason);
     row++;
   });
-  return row + 1;
+  return startRow + LAYOUT.ALERTS.height;
 }
 
-function buildAlerts(latest, previous, routes, stabilityRows) {
+function buildAlerts(latest, previous, routes, stabilityRows, thresholds) {
   const alerts = [];
-  const deltaLcp = metricDelta(latest.lcp, previous ? previous.lcp : null);
-  const deltaInp = metricDelta(latest.inp, previous ? previous.inp : null);
-  const deltaTtfb = metricDelta(latest.ttfb, previous ? previous.ttfb : null);
-  const avgClsStd = stabilityRows.length ? stabilityRows.reduce((sum, rec) => sum + (rec.clsStd || 0), 0) / stabilityRows.length : 0;
-  const highestRoute = routes.slice().sort((a, b) => (b.lcp || 0) - (a.lcp || 0))[0];
 
-  if (deltaLcp !== null && deltaLcp >= 20) {
-    alerts.push({
-      level: 'HIGH',
-      text: `[HIGH] LCP regression (${formatPercent(deltaLcp)})`,
-      reason: `Reason: ${describeTtfb(latest, deltaTtfb)}${highestRoute ? `; worst page ${highestRoute.page} (${highestRoute.device})` : ''}`,
-    });
-  } else if (deltaLcp !== null && deltaLcp >= 10) {
-    alerts.push({
-      level: 'MEDIUM',
-      text: `[MEDIUM] LCP degraded (${formatPercent(deltaLcp)})`,
-      reason: `Reason: ${describeTtfb(latest, deltaTtfb)}`,
-    });
-  } else if (deltaLcp !== null && deltaLcp >= 5) {
-    alerts.push({
-      level: 'LOW',
-      text: `[LOW] LCP trend ↑ (${formatPercent(deltaLcp)})`,
-      reason: `Reason: следи за ${highestRoute ? highestRoute.page : 'ключевыми страницами'}.`,
-    });
-  }
+  // Группируем routes по environment + device для Smart Alerts
+  const groups = {};
+  routes.forEach(route => {
+    const key = `${normalizeEnvironment(route.environment)}|${route.device.toLowerCase()}`;
+    if (!groups[key]) {
+      groups[key] = [];
+    }
+    groups[key].push(route);
+  });
 
-  if (latest.inp && latest.inp >= 1000) {
-    alerts.push({
-      level: 'HIGH',
-      text: '[HIGH] INP critical (>1000ms)',
-      reason: `Reason: ${describeMainThread(latest)}; дёргается JS/тяжёлые задачи.`,
-    });
-  } else if (latest.inp && latest.inp >= 200) {
-    alerts.push({
-      level: 'MEDIUM',
-      text: '[MEDIUM] INP elevated (>200ms)',
-      reason: `Reason: ${describeMainThread(latest)}.`,
-    });
-  } else if (deltaInp !== null && deltaInp >= 20) {
-    alerts.push({
-      level: 'LOW',
-      text: '[LOW] INP growth',
-      reason: `Reason: INP ${formatPercent(deltaInp)} drift.`,
-    });
-  }
+  // Для каждой группы env+device генерируем алерты с полным контекстом
+  Object.keys(groups).forEach(groupKey => {
+    const groupRoutes = groups[groupKey];
+    const parts = groupKey.split('|');
+    const env = parts[0];
+    const device = parts[1];
+    const groupMetrics = aggregateRouteMetrics(groupRoutes);
+    const highestRoute = groupRoutes.slice().sort((a, b) => (b.lcp || 0) - (a.lcp || 0))[0];
+    const scopeLabel = summarizeList_(groupRoutes.map(r => r.page), 3);
 
-  if (latest.cls && latest.cls >= 0.25) {
-    alerts.push({
-      level: 'HIGH',
-      text: '[HIGH] CLS critical (>0.25)',
-      reason: `Reason: unstable layout; CLS std avg ${avgClsStd.toFixed(3)}.`,
-    });
-  } else if (latest.cls && (latest.cls >= 0.1 || avgClsStd > 0.05)) {
-    alerts.push({
-      level: 'MEDIUM',
-      text: '[MEDIUM] CLS unstable (>0.1)',
-      reason: `Reason: CLS std ${avgClsStd.toFixed(3)}; баннеры/шрифты двигаются.`,
-    });
-  }
+    // Находим previous для этой группы
+    const prevLcp = previous ? previous.lcp : null;
+    const prevInp = previous ? previous.inp : null;
+    const prevTtfb = previous ? previous.ttfb : null;
+    const deltaLcp = metricDelta(groupMetrics.lcp, prevLcp);
+    const deltaInp = metricDelta(groupMetrics.inp, prevInp);
+    const deltaTtfb = metricDelta(groupMetrics.ttfb, prevTtfb);
+    const avgClsStd = stabilityRows.length ? stabilityRows.reduce((sum, rec) => sum + (rec.clsStd || 0), 0) / stabilityRows.length : 0;
 
-  if (latest.ttfb && latest.ttfb > 800) {
-    alerts.push({
-      level: 'HIGH',
-      text: '[HIGH] Backend bottleneck (TTFB > 800ms)',
-      reason: `Reason: ${formatMetricValue('ttfb', latest.ttfb)} — сервер откликается медленно.`,
-    });
-  } else if (deltaTtfb !== null && deltaTtfb > 20) {
-    alerts.push({
-      level: 'MEDIUM',
-      text: `[MEDIUM] TTFB growth (${formatPercent(deltaTtfb)})`,
-      reason: 'Reason: response time растёт — может затронуть LCP.',
-    });
-  }
+    // LCP алерты
+    if (deltaLcp !== null && deltaLcp >= 20) {
+      alerts.push({
+        level: 'HIGH', metric: 'LCP', environment: env, device: device,
+        page: highestRoute ? highestRoute.page : '',
+        text: `LCP регресс ${formatPercent(deltaLcp)} (${formatMetricValue('lcp', prevLcp)} → ${formatMetricValue('lcp', groupMetrics.lcp)})`,
+        reason: `Scope: ${scopeLabel}; ${describeTtfb({ ttfb: groupMetrics.ttfb }, deltaTtfb)}`,
+      });
+    } else if (deltaLcp !== null && deltaLcp >= 10) {
+      alerts.push({
+        level: 'MEDIUM', metric: 'LCP', environment: env, device: device,
+        page: highestRoute ? highestRoute.page : '',
+        text: `LCP ухудшился ${formatPercent(deltaLcp)} (${formatMetricValue('lcp', prevLcp)} → ${formatMetricValue('lcp', groupMetrics.lcp)})`,
+        reason: `${describeTtfb({ ttfb: groupMetrics.ttfb }, deltaTtfb)}`,
+      });
+    } else if (deltaLcp !== null && deltaLcp >= 5) {
+      alerts.push({
+        level: 'LOW', metric: 'LCP', environment: env, device: device,
+        page: highestRoute ? highestRoute.page : '',
+        text: `LCP растёт ${formatPercent(deltaLcp)}`,
+        reason: `Следи за ${highestRoute ? highestRoute.page : 'ключевыми страницами'}.`,
+      });
+    }
 
+    // INP алерты
+    const inpStatus = assessMetricStatus('inp', groupMetrics.inp, thresholds).status;
+    if (groupMetrics.inp && inpStatus === 'POOR') {
+      alerts.push({
+        level: 'HIGH', metric: 'INP', environment: env, device: device, page: '',
+        text: `INP вне порога (${formatMetricValue('inp', groupMetrics.inp)})`,
+        reason: `JS/тяжёлые задачи блокируют main thread.`,
+      });
+    } else if (groupMetrics.inp && inpStatus === 'NI') {
+      alerts.push({
+        level: 'MEDIUM', metric: 'INP', environment: env, device: device, page: '',
+        text: `INP повышен (${formatMetricValue('inp', groupMetrics.inp)})`,
+        reason: `Main thread нагружен.`,
+      });
+    } else if (deltaInp !== null && deltaInp >= 20) {
+      alerts.push({
+        level: 'LOW', metric: 'INP', environment: env, device: device, page: '',
+        text: `INP растёт ${formatPercent(deltaInp)}`,
+        reason: `INP drift.`,
+      });
+    }
+
+    // CLS алерты
+    const clsStatus = assessMetricStatus('cls', groupMetrics.cls, thresholds).status;
+    if (groupMetrics.cls && clsStatus === 'POOR') {
+      alerts.push({
+        level: 'HIGH', metric: 'CLS', environment: env, device: device, page: '',
+        text: `CLS вне порога (${groupMetrics.cls.toFixed(3)})`,
+        reason: `Нестабильный layout; CLS std avg ${avgClsStd.toFixed(3)}.`,
+      });
+    } else if (groupMetrics.cls && (clsStatus === 'NI' || avgClsStd > 0.05)) {
+      alerts.push({
+        level: 'MEDIUM', metric: 'CLS', environment: env, device: device, page: '',
+        text: `CLS нестабилен (${groupMetrics.cls.toFixed(3)})`,
+        reason: `CLS std ${avgClsStd.toFixed(3)}; баннеры/шрифты двигаются.`,
+      });
+    }
+
+    // TTFB алерты
+    const ttfbStatus = assessMetricStatus('ttfb', groupMetrics.ttfb, thresholds).status;
+    if (groupMetrics.ttfb && ttfbStatus === 'POOR') {
+      alerts.push({
+        level: 'HIGH', metric: 'TTFB', environment: env, device: device, page: '',
+        text: `Backend bottleneck (${formatMetricValue('ttfb', groupMetrics.ttfb)})`,
+        reason: `Сервер откликается медленно.`,
+      });
+    } else if (deltaTtfb !== null && deltaTtfb > 20) {
+      alerts.push({
+        level: 'MEDIUM', metric: 'TTFB', environment: env, device: device, page: '',
+        text: `TTFB растёт ${formatPercent(deltaTtfb)}`,
+        reason: 'Response time растёт — может затронуть LCP.',
+      });
+    }
+  });
+
+  // Сортировка: HIGH → MEDIUM → LOW
+  const levelOrder = { HIGH: 0, MEDIUM: 1, LOW: 2 };
+  alerts.sort((a, b) => (levelOrder[a.level] || 3) - (levelOrder[b.level] || 3));
   return alerts;
 }
 
@@ -531,8 +1680,9 @@ function describeMainThread(latest) {
 }
 
 function renderOverviewBlock(sheet, row, latest, thresholds) {
-  row = renderBlockHeader(sheet, row, 'BLOCK 1 — OVERVIEW', 3);
-  sheet.getRange(row, 1, 1, 3).setValues([['Metric', 'Value', 'Status']]).setFontWeight('bold');
+  const startRow = row;
+  row = renderBlockHeader(sheet, row, 'БЛОК 4 — СВОДКА ПО МЕТРИКАМ', 3);
+  sheet.getRange(row, 1, 1, 3).setValues([['Метрика', 'Значение', 'Статус']]).setFontWeight('bold');
   row++;
   [
     { label: 'LCP p90', key: 'lcp', value: latest.lcp },
@@ -547,42 +1697,69 @@ function renderOverviewBlock(sheet, row, latest, thresholds) {
     sheet.getRange(row, 3).setBackground(status.color);
     row++;
   });
-  return row + 1;
+  return startRow + LAYOUT.OVERVIEW.height;
 }
 
-function renderTrendBlock(sheet, row, trendRuns, stabilityRows) {
-  row = renderBlockHeader(sheet, row, 'BLOCK 2 — TREND', 4);
+function renderTrendBlock(sheet, row, trendRuns, stabilityRows, routes) {
+  const blockTop = row;
+  row = renderBlockHeader(sheet, row, 'БЛОК 5 — ТРЕНД', 6);
   if (!trendRuns.length) {
     sheet.getRange(row, 1).setValue('Нет истории прогонов.');
-    return row + 2;
+    return blockTop + LAYOUT.TREND.height;
   }
-  const columns = ['Run ID', 'LCP p90', 'INP p90', 'CLS p90'];
-  sheet.getRange(row, 1, 1, columns.length).setValues([columns]).setFontWeight('bold');
-  row++;
-  const data = trendRuns.map(run => [
-    run.runId || '—',
-    run.lcp || 0,
-    run.inp || 0,
-    run.cls || 0,
-  ]);
-  const dataRange = sheet.getRange(row, 1, data.length, columns.length);
-  dataRange.setValues(data);
-  sheet.getRange(row, 2, data.length, 1).setNumberFormat('0');
-  sheet.getRange(row, 3, data.length, 1).setNumberFormat('0');
-  sheet.getRange(row, 4, data.length, 1).setNumberFormat('0.000');
-  insertLineChart(sheet, sheet.getRange(row - 1, 1, data.length + 1, columns.length), row - 1, 6, 'CWV p90 trend');
-  row += data.length;
-  row += 1;
-  sheet.getRange(row, 1, 1, 4).setValues([['Stability — std deviation', '', '', '']]);
+
+  // Разделяем точки на before/after по тегу (теги могут быть составными)
+  const hasTags = trendRuns.some(run => hasTagToken_(run.tag, 'before') || hasTagToken_(run.tag, 'after'));
+
+  if (hasTags) {
+    const columns = ['Run ID', 'LCP before', 'LCP after', 'INP before', 'INP after'];
+    sheet.getRange(row, 1, 1, columns.length).setValues([columns]).setFontWeight('bold');
+    row++;
+    const data = trendRuns.map(run => {
+      const isBefore = hasTagToken_(run.tag, 'before');
+      const isAfter = hasTagToken_(run.tag, 'after');
+      return [
+        run.runId || '—',
+        isBefore ? (run.lcp || 0) : '',
+        isAfter ? (run.lcp || 0) : '',
+        isBefore ? (run.inp || 0) : '',
+        isAfter ? (run.inp || 0) : '',
+      ];
+    });
+    const dataRange = sheet.getRange(row, 1, data.length, columns.length);
+    dataRange.setValues(data);
+    insertLineChart(sheet, sheet.getRange(row - 1, 1, data.length + 1, columns.length), CHART_ZONES.TREND.row, CHART_ZONES.TREND.col, 'Тренд CWV p90 (before/after)');
+    row += data.length + 1;
+  } else {
+    const columns = ['Run ID', 'LCP p90', 'INP p90', 'CLS p90'];
+    sheet.getRange(row, 1, 1, columns.length).setValues([columns]).setFontWeight('bold');
+    row++;
+    const data = trendRuns.map(run => [
+      run.runId || '—',
+      run.lcp || 0,
+      run.inp || 0,
+      run.cls || 0,
+    ]);
+    const dataRange = sheet.getRange(row, 1, data.length, columns.length);
+    dataRange.setValues(data);
+    sheet.getRange(row, 2, data.length, 1).setNumberFormat('0');
+    sheet.getRange(row, 3, data.length, 1).setNumberFormat('0');
+    sheet.getRange(row, 4, data.length, 1).setNumberFormat('0.000');
+    insertLineChart(sheet, sheet.getRange(row - 1, 1, data.length + 1, columns.length), CHART_ZONES.TREND.row, CHART_ZONES.TREND.col, 'Тренд CWV p90');
+    row += data.length + 1;
+  }
+
+  // Stability sub-block
+  sheet.getRange(row, 1, 1, 4).setValues([['Стабильность — std deviation', '', '', '']]);
   sheet.getRange(row, 1, 1, 4).setFontWeight('bold');
   sheet.getRange(row, 1, 1, 4).setBackground('#263238');
   sheet.getRange(row, 1, 1, 4).setFontColor('#ffffff');
   row++;
   if (!stabilityRows.length) {
     sheet.getRange(row, 1).setValue('Stability data missing.');
-    return row + 2;
+    return blockTop + LAYOUT.TREND.height;
   }
-  const stabilityColumns = ['Page', 'LCP std', 'INP std', 'CLS std'];
+  const stabilityColumns = ['Страница', 'LCP std', 'INP std', 'CLS std'];
   sheet.getRange(row, 1, 1, stabilityColumns.length).setValues([stabilityColumns]).setFontWeight('bold');
   row++;
   const stabilityData = stabilityRows
@@ -598,47 +1775,77 @@ function renderTrendBlock(sheet, row, trendRuns, stabilityRows) {
   });
   const chartData = [['Page', 'LCP std', 'INP std', 'CLS std']];
   stabilityData.forEach(item => chartData.push([item.page, item.lcpStd || 0, item.inpStd || 0, item.clsStd || 0]));
-  const helperRow = row;
-  const helperRange = sheet.getRange(helperRow, 7, chartData.length, 4);
+  const helperRange = sheet.getRange(blockTop, HELPER_COLUMN_SECONDARY, chartData.length, 4);
   helperRange.setValues(chartData);
-  insertLineChart(sheet, helperRange, helperRow, 6, 'Std deviation per page');
-  row += chartData.length;
-  return row + 2;
+  insertLineChart(sheet, helperRange, CHART_ZONES.STABILITY.row, CHART_ZONES.STABILITY.col, 'Std deviation по страницам');
+  return blockTop + LAYOUT.TREND.height;
 }
 
-function renderWorstPagesBlock(sheet, row, routes) {
-  row = renderBlockHeader(sheet, row, 'BLOCK 3 — WORST PAGES', 5);
+function renderWorstPagesBlock(sheet, row, routes, thresholds, title) {
+  const blockTop = row;
+  row = renderBlockHeader(sheet, row, title || 'БЛОК 6 — ХУДШИЕ СТРАНИЦЫ', 5);
   if (!routes.length) {
     sheet.getRange(row, 1).setValue('Routes not collected.');
-    return row + 2;
+    return blockTop + LAYOUT.WORST_PAGES.height;
   }
-  const sorted = routes.slice().sort((a, b) => (b.lcp || 0) - (a.lcp || 0));
-  const rows = sorted.slice(0, 10);
-  sheet.getRange(row, 1, 1, 5).setValues([['Page', 'Device', 'LCP p90', 'INP p90', 'CLS p90']]).setFontWeight('bold').setBackground('#ECEFF1');
+  const metricSpecs = [
+    { label: 'P', key: 'avgScore', type: 'low', formatter: value => value },
+    { label: 'LCP', key: 'lcp', type: 'high', formatter: value => value },
+    { label: 'INP', key: 'inp', type: 'high', formatter: value => value },
+    { label: 'CLS', key: 'cls', type: 'high', formatter: value => value },
+    { label: 'TTFB', key: 'ttfb', type: 'high', formatter: value => value },
+  ];
+  const rows = [];
+  metricSpecs.forEach(spec => {
+    const sorted = routes
+      .filter(route => parseNumber(route[spec.key]) !== null)
+      .slice()
+      .sort((a, b) => spec.type === 'low' ? ((a[spec.key] || 0) - (b[spec.key] || 0)) : ((b[spec.key] || 0) - (a[spec.key] || 0)))
+      .slice(0, 3);
+    sorted.forEach(route => {
+      rows.push({
+        metric: spec.label,
+        environment: route.environment,
+        page: route.page,
+        device: route.device,
+        score: route.avgScore,
+        lcp: route.lcp,
+        inp: route.inp,
+        cls: route.cls,
+        ttfb: route.ttfb,
+      });
+    });
+  });
+  sheet.getRange(row, 1, 1, 9).setValues([['Метрика', 'Контур', 'Страница', 'Устройство', 'P', 'LCP p90', 'INP p90', 'CLS p90', 'TTFB']]).setFontWeight('bold').setBackground('#ECEFF1');
   row++;
   rows.forEach(route => {
-    sheet.getRange(row, 1).setValue(route.page);
-    sheet.getRange(row, 2).setValue(route.device);
-    sheet.getRange(row, 3).setValue(route.lcp || 0);
-    sheet.getRange(row, 4).setValue(route.inp || 0);
-    sheet.getRange(row, 5).setValue(route.cls || 0);
+    sheet.getRange(row, 1, 1, 9).setValues([[
+      route.metric,
+      route.environment,
+      route.page,
+      route.device,
+      route.score || '—',
+      route.lcp || '—',
+      route.inp || '—',
+      route.cls || '—',
+      route.ttfb || '—',
+    ]]);
+    colorMetricCell_(sheet, row, 5, 'p', route.score, thresholds);
+    colorMetricCell_(sheet, row, 6, 'lcp', route.lcp, thresholds);
+    colorMetricCell_(sheet, row, 7, 'inp', route.inp, thresholds);
+    colorMetricCell_(sheet, row, 8, 'cls', route.cls, thresholds);
+    colorMetricCell_(sheet, row, 9, 'ttfb', route.ttfb, thresholds);
     row++;
   });
-  const helperData = [['Page', 'LCP p90']];
-  rows.forEach(route => helperData.push([route.page, route.lcp || 0]));
-  const helperRow = row;
-  const helperRange = sheet.getRange(helperRow, 7, helperData.length, 2);
-  helperRange.setValues(helperData);
-  insertColumnChart(sheet, helperRange, helperRow, 6, 'Top 10 LCP');
-  row += helperData.length + 1;
-  return row;
+  return blockTop + LAYOUT.WORST_PAGES.height;
 }
 
-function renderDeviceSplitBlock(sheet, row, routes) {
-  row = renderBlockHeader(sheet, row, 'BLOCK 4 — DEVICE SPLIT', 4);
+function renderDeviceSplitBlock(sheet, row, routes, thresholds, title) {
+  const blockTop = row;
+  row = renderBlockHeader(sheet, row, title || 'БЛОК 7 — DESKTOP VS MOBILE', 4);
   if (!routes.length) {
     sheet.getRange(row, 1).setValue('Нет данных по девайсам.');
-    return row + 2;
+    return blockTop + LAYOUT.DEVICE_SPLIT.height;
   }
   const buckets = routes.reduce((acc, route) => {
     const device = route.device.toLowerCase();
@@ -661,101 +1868,259 @@ function renderDeviceSplitBlock(sheet, row, routes) {
     const count = totals.count || 1;
     return {
       device,
+      environments: summarizeList_(routes.filter(route => route.device.toLowerCase() === device).map(route => route.environment), 4),
+      pages: uniqueNonEmptyValues_(routes.filter(route => route.device.toLowerCase() === device).map(route => route.page)).length,
       lcp: Math.round(totals.lcp / count) || 0,
       inp: Math.round(totals.inp / count) || 0,
       cls: parseFloat((totals.cls / count).toFixed(3)) || 0,
+      ttfb: Math.round(routes.filter(route => route.device.toLowerCase() === device).reduce((sum, route) => sum + (route.ttfb || 0), 0) / count) || 0,
+      note: `среднее по ${count} строкам`,
     };
   });
-  sheet.getRange(row, 1, 1, 4).setValues([['Device', 'LCP p90', 'INP p90', 'CLS p90']]).setFontWeight('bold').setBackground('#ECEFF1');
+  sheet.getRange(row, 1, 1, 8).setValues([['Устройство', 'Контуры', 'Страницы', 'LCP p90', 'INP p90', 'CLS p90', 'TTFB', 'Расчёт']]).setFontWeight('bold').setBackground('#ECEFF1');
   row++;
   rows.forEach(entry => {
-    sheet.getRange(row, 1).setValue(entry.device);
-    sheet.getRange(row, 2).setValue(entry.lcp);
-    sheet.getRange(row, 3).setValue(entry.inp);
-    sheet.getRange(row, 4).setValue(entry.cls);
+    sheet.getRange(row, 1, 1, 8).setValues([[
+      entry.device,
+      entry.environments,
+      entry.pages,
+      entry.lcp,
+      entry.inp,
+      entry.cls,
+      entry.ttfb,
+      entry.note,
+    ]]);
+    colorMetricCell_(sheet, row, 4, 'lcp', entry.lcp, thresholds);
+    colorMetricCell_(sheet, row, 5, 'inp', entry.inp, thresholds);
+    colorMetricCell_(sheet, row, 6, 'cls', entry.cls, thresholds);
+    colorMetricCell_(sheet, row, 7, 'ttfb', entry.ttfb, thresholds);
     row++;
   });
   const chartData = [['Device', 'LCP p90', 'INP p90', 'CLS p90']];
   rows.forEach(entry => chartData.push([entry.device, entry.lcp, entry.inp, entry.cls]));
-  const helperRow = row;
-  const helperRange = sheet.getRange(helperRow, 7, chartData.length, 4);
+  const helperRow = blockTop;
+  const helperRange = sheet.getRange(helperRow, HELPER_COLUMN_PRIMARY, chartData.length, 4);
   helperRange.setValues(chartData);
-  insertGroupedBarChart(sheet, helperRange, helperRow, 6, 'Mobile vs Desktop');
-  row += chartData.length + 1;
-  return row;
+  insertGroupedBarChart(sheet, helperRange, CHART_ZONES.DEVICE.row, CHART_ZONES.DEVICE.col, 'Mobile vs Desktop');
+  return blockTop + LAYOUT.DEVICE_SPLIT.height;
 }
 
-function renderDiagnosticsBlock(sheet, row, latest) {
-  row = renderBlockHeader(sheet, row, 'BLOCK 5 — DIAGNOSTICS', 3);
-  const diagnostics = buildDiagnostics(latest);
+function renderDiagnosticsBlock(sheet, row, latest, thresholds) {
+  const startRow = row;
+  row = renderBlockHeader(sheet, row, 'БЛОК 8 — ДИАГНОСТИКА', 3);
+  const diagnostics = buildDiagnostics(latest, thresholds);
   if (!diagnostics.length) {
     sheet.getRange(row, 1).setValue('Сигналов нет, продолжай мониторинг.');
-    return row + 2;
+    return startRow + LAYOUT.DIAGNOSTICS.height;
   }
-  sheet.getRange(row, 1, 1, 2).setValues([['Issue', 'Reason']]).setFontWeight('bold').setBackground('#ECEFF1');
+  sheet.getRange(row, 1, 1, 2).setValues([['Проблема', 'Причина']]).setFontWeight('bold').setBackground('#ECEFF1');
   row++;
   diagnostics.forEach(item => {
     sheet.getRange(row, 1).setValue(item.title);
     sheet.getRange(row, 2).setValue(item.detail);
     row++;
   });
-  return row + 1;
+  return startRow + LAYOUT.DIAGNOSTICS.height;
 }
 
-function buildDiagnostics(latest) {
+function buildDiagnostics(latest, thresholds) {
   const diagnostics = [];
-  if (latest.ttfb && latest.ttfb > 800) {
-    diagnostics.push({ title: 'Backend bottleneck', detail: `TTFB ${formatMetricValue('ttfb', latest.ttfb)} > 800ms` });
+  if (latest.ttfb && assessMetricStatus('ttfb', latest.ttfb, thresholds).status === 'POOR') {
+    diagnostics.push({ title: 'Backend bottleneck', detail: `TTFB ${formatMetricValue('ttfb', latest.ttfb)} хуже порога из Config` });
   }
-  if (latest.ttfb && latest.lcp && latest.ttfb <= 800 && latest.lcp > 4000) {
-    diagnostics.push({ title: 'Frontend rendering', detail: `LCP ${formatMetricValue('lcp', latest.lcp)} > 4000ms при нормальном TTFB` });
+  if (latest.ttfb && latest.lcp && assessMetricStatus('ttfb', latest.ttfb, thresholds).status === 'POOR' && assessMetricStatus('lcp', latest.lcp, thresholds).status === 'POOR') {
+    diagnostics.push({ title: 'SSR waterfall / chained requests', detail: `TTFB ${formatMetricValue('ttfb', latest.ttfb)} + LCP ${formatMetricValue('lcp', latest.lcp)} — серверный рендеринг блокирует отрисовку` });
   }
-  if (latest.inp && (latest.inp > 200 || (latest.tbt && latest.tbt > 300))) {
+  if (latest.ttfb && latest.lcp && assessMetricStatus('ttfb', latest.ttfb, thresholds).status === 'GOOD' && assessMetricStatus('lcp', latest.lcp, thresholds).status === 'POOR') {
+    diagnostics.push({ title: 'Frontend rendering', detail: `LCP ${formatMetricValue('lcp', latest.lcp)} хуже порога при нормальном TTFB` });
+  }
+  if (latest.inp && (assessMetricStatus('inp', latest.inp, thresholds).status !== 'GOOD' || (latest.tbt && latest.tbt > 300))) {
     diagnostics.push({ title: 'Main thread blocking', detail: `INP ${formatMetricValue('inp', latest.inp)} | TBT ${formatMetricValue('tbt', latest.tbt)}` });
   }
-  if (latest.cls && latest.cls > 0.1) {
-    diagnostics.push({ title: 'Layout shift', detail: `CLS ${latest.cls.toFixed(3)} > 0.1 (изображения/баннеры)` });
+  if (latest.cls && assessMetricStatus('cls', latest.cls, thresholds).status !== 'GOOD') {
+    diagnostics.push({ title: 'Layout shift', detail: `CLS ${latest.cls.toFixed(3)} вне зелёной зоны (изображения/баннеры)` });
   }
   return diagnostics;
 }
 
-function renderRouteHealthBlock(sheet, row, routes, stabilityMap) {
-  row = renderBlockHeader(sheet, row, 'BLOCK 6 — ROUTE HEALTH', 5);
+function buildDeduplicatedRouteHealth(routes, stabilityMap, thresholds) {
+  // Группировка по page + device + environment → один агрегат
+  const grouped = {};
+  routes.forEach(route => {
+    const key = `${route.page}|${route.device.toLowerCase()}|${normalizeEnvironment(route.environment)}`;
+    if (!grouped[key]) {
+      grouped[key] = [];
+    }
+    grouped[key].push(route);
+  });
+
+  return Object.keys(grouped).map(key => {
+    const group = grouped[key];
+    const sample = group[group.length - 1];
+    const metrics = aggregateRouteMetrics(group);
+    const stabKey = buildStabilityKey(sample.project, sample.environment, sample.source, sample.page, sample.device.toLowerCase());
+    const stability = stabilityMap[stabKey];
+    const statusInfo = evaluateRouteHealth({ lcp: metrics.lcp, inp: metrics.inp, cls: metrics.cls, ttfb: metrics.ttfb }, stability, thresholds);
+
+    // Delta: ищем предыдущие данные для того же page+device+env (первая и последняя группы)
+    let deltaLcp = null;
+    if (group.length >= 2) {
+      const prevLcp = group[0].lcp;
+      const currLcp = group[group.length - 1].lcp;
+      deltaLcp = metricDelta(currLcp, prevLcp);
+    }
+
+    return {
+      page: sample.page,
+      device: sample.device,
+      environment: normalizeEnvironment(sample.environment),
+      lcp: metrics.lcp,
+      deltaLcp: deltaLcp,
+      inp: metrics.inp,
+      cls: metrics.cls,
+      status: statusInfo.status,
+      statusColor: statusInfo.color,
+      reason: statusInfo.reason,
+    };
+  });
+}
+
+function renderRouteHealthBlock(sheet, row, routes, stabilityMap, thresholds) {
+  const startRow = row;
+  row = renderBlockHeader(sheet, row, 'БЛОК 9 — ЗДОРОВЬЕ РОУТОВ', 9);
   if (!routes.length) {
     sheet.getRange(row, 1).setValue('Нет данных по маршрутам.');
-    return row + 2;
+    return startRow + LAYOUT.ROUTE_HEALTH.height;
   }
-  sheet.getRange(row, 1, 1, 5).setValues([['Page', 'Type', 'Device', 'Status', 'Reason']]).setFontWeight('bold').setBackground('#ECEFF1');
+  const dedupRows = buildDeduplicatedRouteHealth(routes, stabilityMap, thresholds);
+  sheet.getRange(row, 1, 1, 9).setValues([['Страница', 'Устройство', 'Контур', 'LCP', 'Δ LCP', 'INP', 'CLS', 'Статус', 'Причина']]).setFontWeight('bold').setBackground('#ECEFF1');
   row++;
-  routes.forEach(route => {
-    const key = `${route.page}|${route.device.toLowerCase()}`;
-    const stability = stabilityMap[key];
-    const statusInfo = evaluateRouteHealth(route, stability);
-    sheet.getRange(row, 1).setValue(route.page);
-    sheet.getRange(row, 2).setValue(route.type);
-    sheet.getRange(row, 3).setValue(route.device);
-    sheet.getRange(row, 4).setValue(statusInfo.status);
-    sheet.getRange(row, 5).setValue(statusInfo.reason);
+  dedupRows.forEach(item => {
+    sheet.getRange(row, 1, 1, 9).setValues([[
+      item.page,
+      item.device,
+      item.environment,
+      item.lcp !== null ? formatMetricValue('lcp', item.lcp) : '—',
+      item.deltaLcp !== null ? formatPercent(item.deltaLcp) : '—',
+      item.inp !== null ? formatMetricValue('inp', item.inp) : '—',
+      item.cls !== null ? item.cls.toFixed(3) : '—',
+      item.status,
+      item.reason,
+    ]]);
+    sheet.getRange(row, 4).setBackground(assessMetricStatus('lcp', item.lcp, thresholds).color);
+    sheet.getRange(row, 8).setBackground(item.statusColor);
     row++;
   });
-  return row + 1;
+  return startRow + LAYOUT.ROUTE_HEALTH.height;
 }
 
-function evaluateRouteHealth(route, stability) {
+function evaluateRouteHealth(route, stability, thresholds) {
   const { lcp = 0, inp = 0, cls = 0 } = route;
-  if (lcp > 10000 || inp > 1000 || cls > 0.25) {
-    return { status: 'BAD', reason: `LCP ${formatMetricValue('lcp', lcp)}, INP ${formatMetricValue('inp', inp)}, CLS ${cls ? cls.toFixed(3) : 0}` };
+  const lcpStatus = assessMetricStatus('lcp', lcp, thresholds).status;
+  const inpStatus = assessMetricStatus('inp', inp, thresholds).status;
+  const clsStatus = assessMetricStatus('cls', cls, thresholds).status;
+  if (lcpStatus === 'POOR' || inpStatus === 'POOR' || clsStatus === 'POOR') {
+    return {
+      status: 'BAD',
+      color: STATUS_COLORS.POOR,
+      reason: `LCP ${formatMetricValue('lcp', lcp)}, INP ${formatMetricValue('inp', inp)}, CLS ${cls ? cls.toFixed(3) : 0}`,
+    };
   }
-  if (lcp > 4000 || inp > 500 || cls > 0.1) {
-    return { status: 'MEDIUM', reason: `Metrics elevated (LCP ${formatMetricValue('lcp', lcp)})` };
+  if (lcpStatus === 'NI' || inpStatus === 'NI' || clsStatus === 'NI') {
+    return { status: 'MEDIUM', color: STATUS_COLORS.NI, reason: `Metrics elevated (LCP ${formatMetricValue('lcp', lcp)})` };
   }
   const stabilityHint = stability && stability.clsStd ? `CLS std ${stability.clsStd.toFixed(3)}` : '-';
-  return { status: 'OK', reason: stabilityHint };
+  return { status: 'OK', color: STATUS_COLORS.GOOD, reason: stabilityHint };
 }
 
-function renderExperimentsBlock(sheet, row, runs) {
-  row = renderBlockHeader(sheet, row, 'BLOCK 7 — EXPERIMENTS', 7);
-  sheet.getRange(row, 1, 1, 7).setValues([['Tag', 'Run ID', 'LCP p90', 'Δ LCP', 'INP p90', 'CLS p90', 'Result']]).setFontWeight('bold').setBackground('#ECEFF1');
+function renderSprintImpactBlock(sheet, row, project, filters, allRuns, allRoutes, thresholds, title) {
+  const startRow = row;
+  row = renderBlockHeader(sheet, row, title || 'БЛОК — SPRINT IMPACT', 8);
+  const sprintConfig = readSprintMetadata(sheet);
+
+  // Находим routes с тегами before/after для текущего sprint
+  const sprintRoutes = allRoutes.filter(route => {
+    if (sprintConfig && sprintConfig.activeSprint) {
+      if (toText(route.sprint).trim() !== sprintConfig.activeSprint) return false;
+    }
+    return true;
+  });
+
+  // Теги могут быть составными (напр. "after,Regress") — ищем наличие before/after
+  const beforeRoutes = sprintRoutes.filter(r => hasTagToken_(r.tag, 'before'));
+  const afterRoutes = sprintRoutes.filter(r => hasTagToken_(r.tag, 'after'));
+
+  if (!beforeRoutes.length && !afterRoutes.length) {
+    sheet.getRange(row, 1).setValue('Нет данных before/after для текущего спринта.').setFontStyle('italic');
+    return startRow + LAYOUT.SPRINT_IMPACT.height;
+  }
+
+  // Группируем по environment + device
+  const envDeviceKeys = new Set();
+  beforeRoutes.forEach(r => envDeviceKeys.add(`${normalizeEnvironment(r.environment)}|${r.device.toLowerCase()}`));
+  afterRoutes.forEach(r => envDeviceKeys.add(`${normalizeEnvironment(r.environment)}|${r.device.toLowerCase()}`));
+
+  const impactRows = [];
+  envDeviceKeys.forEach(key => {
+    const parts = key.split('|');
+    const env = parts[0];
+    const device = parts[1];
+    const bRoutes = beforeRoutes.filter(r => normalizeEnvironment(r.environment) === env && r.device.toLowerCase() === device);
+    const aRoutes = afterRoutes.filter(r => normalizeEnvironment(r.environment) === env && r.device.toLowerCase() === device);
+    const bMetrics = aggregateRouteMetrics(bRoutes);
+    const aMetrics = aggregateRouteMetrics(aRoutes);
+    const lcpDelta = metricDelta(aMetrics.lcp, bMetrics.lcp);
+    const inpDelta = metricDelta(aMetrics.inp, bMetrics.inp);
+    const clsDelta = metricDelta(aMetrics.cls, bMetrics.cls);
+
+    let result = 'STABLE';
+    if (lcpDelta !== null && lcpDelta < -10) result = 'IMPROVED';
+    else if (lcpDelta !== null && lcpDelta > 10) result = 'REGRESSION';
+
+    impactRows.push({ env, device, lcpBefore: bMetrics.lcp, lcpAfter: aMetrics.lcp, lcpDelta, inpDelta, clsDelta, result });
+  });
+
+  sheet.getRange(row, 1, 1, 8).setValues([['Контур', 'Устройство', 'LCP before', 'LCP after', 'Δ LCP', 'Δ INP', 'Δ CLS', 'Результат']]).setFontWeight('bold').setBackground('#ECEFF1');
+  row++;
+  const dataStartRow = row;
+  impactRows.forEach(item => {
+    const resultColor = item.result === 'IMPROVED' ? STATUS_COLORS.GOOD : (item.result === 'REGRESSION' ? STATUS_COLORS.POOR : STATUS_COLORS.NI);
+    sheet.getRange(row, 1, 1, 8).setValues([[
+      item.env,
+      item.device,
+      item.lcpBefore !== null ? formatMetricValue('lcp', item.lcpBefore) : '—',
+      item.lcpAfter !== null ? formatMetricValue('lcp', item.lcpAfter) : '—',
+      item.lcpDelta !== null ? formatPercent(item.lcpDelta) : '—',
+      item.inpDelta !== null ? formatPercent(item.inpDelta) : '—',
+      item.clsDelta !== null ? formatPercent(item.clsDelta) : '—',
+      item.result,
+    ]]);
+    sheet.getRange(row, 8).setBackground(resultColor);
+    row++;
+  });
+
+  // Sprint Impact Chart — grouped bar: LCP before vs LCP after
+  if (impactRows.length) {
+    const chartData = [['Срез', 'LCP before', 'LCP after']];
+    impactRows.forEach(item => {
+      chartData.push([`${item.env}-${item.device}`, item.lcpBefore || 0, item.lcpAfter || 0]);
+    });
+    const helperRange = sheet.getRange(startRow, HELPER_COLUMN_SECONDARY, chartData.length, 3);
+    helperRange.setValues(chartData);
+    insertGroupedBarChart(sheet, helperRange, CHART_ZONES.SPRINT.row, CHART_ZONES.SPRINT.col, 'Sprint Impact: LCP before vs after');
+  }
+
+  return startRow + LAYOUT.SPRINT_IMPACT.height;
+}
+
+function hasTagToken_(tag, token) {
+  if (!tag) return false;
+  return toText(tag).toLowerCase().split(/[,;\s]+/).some(t => t.trim() === token.toLowerCase());
+}
+
+function renderExperimentsBlock(sheet, row, runs, thresholds) {
+  row = renderBlockHeader(sheet, row, 'БЛОК 10 — ЭКСПЕРИМЕНТЫ', 7);
+  sheet.getRange(row, 1, 1, 7).setValues([['Тег', 'Run ID', 'LCP p90', 'Δ LCP', 'INP p90', 'CLS p90', 'Результат']]).setFontWeight('bold').setBackground('#ECEFF1');
   row++;
   let hasTag = false;
   runs.forEach((run, index) => {
@@ -772,6 +2137,9 @@ function renderExperimentsBlock(sheet, row, runs) {
     sheet.getRange(row, 5).setValue(formatMetricValue('inp', run.inp));
     sheet.getRange(row, 6).setValue(run.cls ? run.cls.toFixed(3) : '—');
     sheet.getRange(row, 7).setValue(delta !== null && delta <= 0 ? 'OK' : 'REGRESS');
+    colorMetricCell_(sheet, row, 3, 'lcp', run.lcp, thresholds);
+    colorMetricCell_(sheet, row, 5, 'inp', run.inp, thresholds);
+    colorMetricCell_(sheet, row, 6, 'cls', run.cls, thresholds);
     row++;
   });
   if (!hasTag) {
@@ -826,3 +2194,8 @@ function insertGroupedBarChart(sheet, range, row, column, title) {
     .build();
   sheet.insertChart(chart);
 }
+
+
+
+
+
