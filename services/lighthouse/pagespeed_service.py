@@ -12,9 +12,13 @@ import pytest
 
 import sys
 
+import threading
+
+import time
+
 from datetime import datetime
 
-from typing import Optional, Tuple, List, Literal
+from typing import Optional, Tuple, List, Literal, Dict, Any
 
 import requests
 
@@ -53,6 +57,41 @@ from services.lighthouse.configs.config_lighthouse import (
 dotenv_path = os.path.join(os.path.dirname(__file__), 'configs', 'config_lighthouse.env')
 
 load_dotenv(dotenv_path)
+
+
+class RateLimiter:
+    """Token-bucket rate limiter для PageSpeed API (~20 запросов в 100 секунд)."""
+
+    def __init__(self, max_tokens: int = 20, refill_period: float = 100.0):
+        self._max_tokens = max_tokens
+        self._refill_period = refill_period
+        self._tokens = float(max_tokens)
+        self._last_refill = time.monotonic()
+        self._lock = threading.Lock()
+
+    def acquire(self):
+        """Блокирует до получения токена."""
+        while True:
+            with self._lock:
+                self._refill()
+                if self._tokens >= 1.0:
+                    self._tokens -= 1.0
+                    return
+                # Вычисляем время до следующего токена
+                wait = self._refill_period / self._max_tokens
+            time.sleep(wait)
+
+    def _refill(self):
+        now = time.monotonic()
+        elapsed = now - self._last_refill
+        new_tokens = elapsed * (self._max_tokens / self._refill_period)
+        self._tokens = min(self._max_tokens, self._tokens + new_tokens)
+        self._last_refill = now
+
+
+# Глобальный rate limiter для PageSpeed API
+_api_rate_limiter = RateLimiter(max_tokens=20, refill_period=100.0)
+
 
 def _save_api_result(json_result: dict, route_key: str, device_type: str) -> str:
 
@@ -213,11 +252,12 @@ class SpeedtestService:
 
                         base_url: Optional[str] = None,
 
-                        run_id: Optional[str] = None, tag: str = ""):
+                        run_id: Optional[str] = None, tag: str = "", sprint: str = "") -> Dict[str, Any]:
 
         """
 
         Выполняет тесты с использованием локального Lighthouse CLI.
+        Возвращает summary: {"succeeded": [...], "failed": [...]}.
 
         """
 
@@ -228,26 +268,36 @@ class SpeedtestService:
         route_keys = route_keys or self._get_routes_from_config()
 
         routes = prepare_routes(route_keys, base_url=base_url)
-        
+
         # Генерация run_id если не передан
         if run_id is None:
             from datetime import datetime
-            # TODO: добавить pid/uuid к run_id, чтобы параллельные прогоны не сталкивались
-            run_id = datetime.now().strftime("%Y.%m.%d") + "-1"
+            run_id = datetime.now().strftime("%Y.%m.%d-%H%M%S")
+
+        succeeded = []
+        failed = []
 
         for route_key, route_url in routes:
-            print(f"[DEBUG]: Перед запуском: {route_key} — {route_url}")
-            if not _check_site_availability(route_url):
-                print(f"[ERROR] {route_url} недоступен — пропуск.")
-                continue
+            try:
+                print(f"[DEBUG]: Перед запуском: {route_key} — {route_url}")
+                if not _check_site_availability(route_url):
+                    print(f"[ERROR] {route_url} недоступен — пропуск.")
+                    failed.append({"route": route_key, "error": "site unavailable"})
+                    continue
 
-            json_paths = run_local_lighthouse(route_key, route_url, n_iteration, device_type)
-            process_and_save_results(json_paths, route_key, device_type, google_client,
-                                     is_local=True, keep_temp_files=keep_temp_files,
-                                     environment=self.environment, full_url=route_url,
-                                     iterations=n_iteration, run_id=run_id, tag=tag)
+                json_paths = run_local_lighthouse(route_key, route_url, n_iteration, device_type)
+                process_and_save_results(json_paths, route_key, device_type, google_client,
+                                         is_local=True, keep_temp_files=keep_temp_files,
+                                         environment=self.environment, full_url=route_url,
+                                         iterations=n_iteration, run_id=run_id, tag=tag, sprint=sprint)
 
-        google_client.flush()
+                google_client.flush()
+                succeeded.append(route_key)
+            except Exception as e:
+                print(f"[ERROR] Ошибка при обработке роута '{route_key}': {e}")
+                failed.append({"route": route_key, "error": str(e)})
+
+        return {"succeeded": succeeded, "failed": failed}
 
     def run_api_aggregated_tests(self, route_keys: Optional[List[str]], device_type: str,
 
@@ -255,11 +305,12 @@ class SpeedtestService:
 
                                  base_url: Optional[str] = None,
 
-                                 run_id: Optional[str] = None, tag: str = ""):
+                                 run_id: Optional[str] = None, tag: str = "", sprint: str = "") -> Dict[str, Any]:
 
         """
 
         Выполняет запуск Lighthouse через PageSpeed API с агрегацией.
+        Возвращает summary: {"succeeded": [...], "failed": [...]}.
 
         """
 
@@ -270,110 +321,143 @@ class SpeedtestService:
         route_keys = route_keys or self._get_routes_from_config()
 
         routes = prepare_routes(route_keys, base_url=base_url)
-        
+
         # Генерация run_id если не передан
         if run_id is None:
             from datetime import datetime
-            run_id = datetime.now().strftime("%Y.%m.%d") + "-1"
+            run_id = datetime.now().strftime("%Y.%m.%d-%H%M%S")
+
+        succeeded = []
+        failed = []
 
         for route_key, route_url in routes:
+            try:
+                print(f"[DEBUG]: API запуск для {route_key}: {route_url}")
 
-            print(f"[DEBUG]: API запуск для {route_key}: {route_url}")
+                temp_dir = get_temp_dir_for_route(route_key, device_type, prefix="API")
 
-            temp_dir = get_temp_dir_for_route(route_key, device_type, prefix="API")
+                json_paths = []
 
-            json_paths = []
+                for iteration in range(1, n_iteration + 1):
+                    _api_rate_limiter.acquire()
 
-            for iteration in range(1, n_iteration + 1):
+                    json_result = run_api_lighthouse(
 
-                json_result = run_api_lighthouse(
+                        url=route_url,
 
-                    url=route_url,
+                        strategy=device_type,
 
-                    strategy=device_type,
+                        categories=["performance", "accessibility", "best-practices", "seo"]
 
-                    categories=["performance", "accessibility", "best-practices", "seo"]
+                    )
 
-                )
+                    if not json_result:
 
-                if not json_result:
+                        print(f"[WARNING] Итерация {iteration} без данных: {route_key}")
 
-                    print(f"[WARNING] Итерация {iteration} без данных: {route_key}")
+                        continue
 
-                    continue
+                    json_path = os.path.join(temp_dir, f"Report_API_{iteration}.json")
 
-                json_path = os.path.join(temp_dir, f"Report_API_{iteration}.json")
+                    with open(json_path, "w", encoding="utf-8") as f:
 
-                with open(json_path, "w", encoding="utf-8") as f:
+                        json.dump(json_result, f, ensure_ascii=False, indent=2)
 
-                    json.dump(json_result, f, ensure_ascii=False, indent=2)
+                    json_paths.append(json_path)
 
-                json_paths.append(json_path)
+                process_and_save_results(json_paths, route_key, device_type, google_client,
+                                         is_local=False, keep_temp_files=keep_temp_files,
+                                         environment=self.environment, full_url=route_url,
+                                         iterations=n_iteration, run_id=run_id, tag=tag, sprint=sprint)
 
-            process_and_save_results(json_paths, route_key, device_type, google_client,
-                                     is_local=False, keep_temp_files=keep_temp_files,
-                                     environment=self.environment, full_url=route_url,
-                                     iterations=n_iteration, run_id=run_id, tag=tag)
+                google_client.flush()
+                succeeded.append(route_key)
+            except Exception as e:
+                print(f"[ERROR] Ошибка при обработке роута '{route_key}': {e}")
+                failed.append({"route": route_key, "error": str(e)})
 
-        google_client.flush()
+        return {"succeeded": succeeded, "failed": failed}
 
     def run_crux_data_collection(self, route_keys: Optional[List[str]], device_type: str,
                                  base_url: Optional[str] = None,
-                                 include_origin: bool = False):
-        """Выполняет сбор CrUX: page (field) + опционально origin по каждому роуту и девайсу."""
+                                 include_origin: bool = False,
+                                 run_id: Optional[str] = None,
+                                 tag: str = "",
+                                 sprint: str = "") -> Dict[str, Any]:
+        """Выполняет сбор CrUX: page (field) + опционально origin по каждому роуту и девайсу.
+        Возвращает summary: {"succeeded": [...], "failed": [...]}."""
         google_client = self._initialize_google_client("crux")
         base_url = base_url or get_base_url(self.environment)
         route_keys = route_keys or self._get_routes_from_config()
         routes = prepare_routes(route_keys, base_url=base_url)
 
+        succeeded = []
+        failed = []
+
         for route_key, route_url in routes:
-            print(f"[DEBUG]: CrUX для {route_key}: {route_url}")
+            try:
+                print(f"[DEBUG]: CrUX для {route_key}: {route_url}")
 
-            # URL-level (page) field data
-            crux_data_url = run_api_lighthouse(
-                url=route_url,
-                strategy=device_type,
-                mode="field"
-            )
-            temp_dir_url = get_temp_dir_for_route(route_key, device_type, prefix="CrUX")
-            crux_file_url = os.path.join(temp_dir_url, "crux_data.json")
-            with open(crux_file_url, "w", encoding="utf-8") as f:
-                json.dump(crux_data_url, f, ensure_ascii=False, indent=2)
-            print(f"[INFO]: CrUX (page) сохранен: {crux_file_url}")
-            process_crux_results(
-                crux_file_url,
-                route_key,
-                device_type,
-                google_client,
-                full_url_override=route_url,
-                route_label=route_key,
-                environment=self.environment,
-            )
+                _api_rate_limiter.acquire()
 
-            if include_origin:
-                origin_url = base_url.rstrip('/')
-                print(f"[DEBUG]: CrUX origin для {route_key}: {origin_url}")
-                crux_data_origin = run_api_lighthouse(
-                    url=origin_url,
+                # URL-level (page) field data
+                crux_data_url = run_api_lighthouse(
+                    url=route_url,
                     strategy=device_type,
-                    mode="origin"
+                    mode="field"
                 )
-                temp_dir_origin = get_temp_dir_for_route(route_key + "_origin", device_type, prefix="CrUX")
-                crux_file_origin = os.path.join(temp_dir_origin, "crux_origin_data.json")
-                with open(crux_file_origin, "w", encoding="utf-8") as f:
-                    json.dump(crux_data_origin, f, ensure_ascii=False, indent=2)
-                print(f"[INFO]: CrUX (origin) сохранен: {crux_file_origin}")
+                temp_dir_url = get_temp_dir_for_route(route_key, device_type, prefix="CrUX")
+                crux_file_url = os.path.join(temp_dir_url, "crux_data.json")
+                with open(crux_file_url, "w", encoding="utf-8") as f:
+                    json.dump(crux_data_url, f, ensure_ascii=False, indent=2)
+                print(f"[INFO]: CrUX (page) сохранен: {crux_file_url}")
                 process_crux_results(
-                    crux_file_origin,
+                    crux_file_url,
                     route_key,
                     device_type,
                     google_client,
-                    full_url_override=origin_url,
-                    route_label=f"{route_key} (origin)",
+                    full_url_override=route_url,
+                    route_label=route_key,
                     environment=self.environment,
+                    run_id=run_id,
+                    tag=tag,
+                    sprint=sprint,
                 )
 
-        google_client.flush()
+                if include_origin:
+                    origin_url = base_url.rstrip('/')
+                    print(f"[DEBUG]: CrUX origin для {route_key}: {origin_url}")
+                    _api_rate_limiter.acquire()
+                    crux_data_origin = run_api_lighthouse(
+                        url=origin_url,
+                        strategy=device_type,
+                        mode="origin"
+                    )
+                    temp_dir_origin = get_temp_dir_for_route(route_key + "_origin", device_type, prefix="CrUX")
+                    crux_file_origin = os.path.join(temp_dir_origin, "crux_origin_data.json")
+                    with open(crux_file_origin, "w", encoding="utf-8") as f:
+                        json.dump(crux_data_origin, f, ensure_ascii=False, indent=2)
+                    print(f"[INFO]: CrUX (origin) сохранен: {crux_file_origin}")
+                    process_crux_results(
+                        crux_file_origin,
+                        route_key,
+                        device_type,
+                        google_client,
+                        full_url_override=origin_url,
+                        route_label=f"{route_key} (origin)",
+                        environment=self.environment,
+                        run_id=run_id,
+                        tag=tag,
+                        sprint=sprint,
+                    )
+
+                google_client.flush()
+                succeeded.append(route_key)
+            except Exception as e:
+                print(f"[ERROR] Ошибка при обработке CrUX роута '{route_key}': {e}")
+                failed.append({"route": route_key, "error": str(e)})
+
+        return {"succeeded": succeeded, "failed": failed}
 
 if __name__ == "__main__":
 

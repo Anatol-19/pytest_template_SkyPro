@@ -11,6 +11,7 @@ import os
 import shutil
 import subprocess
 import platform
+import sys
 from datetime import datetime
 
 from services.lighthouse.configs.config_lighthouse import get_temp_dir_for_route
@@ -47,6 +48,18 @@ def find_lighthouse_cmd():
 
     return None
 
+def _subprocess_kwargs() -> dict:
+    """Возвращает kwargs для subprocess.run, скрывающие окно на Windows."""
+    kwargs: dict = {}
+    if sys.platform == "win32":
+        si = subprocess.STARTUPINFO()
+        si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        si.wShowWindow = subprocess.SW_HIDE
+        kwargs["startupinfo"] = si
+        kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
+    return kwargs
+
+
 # Используем функцию для определения LIGHTHOUSE_CMD
 LIGHTHOUSE_CMD = find_lighthouse_cmd()
 _lighthouse_checked = False  # Флаг, чтобы проверять окружение только один раз
@@ -65,7 +78,7 @@ def check_lighthouse_environment():
         raise RuntimeError("❌ Lighthouse не найден в PATH. Установите его: npm install -g lighthouse")
 
     try:
-        result = subprocess.run([LIGHTHOUSE_CMD, "--version"], capture_output=True, text=True)
+        result = subprocess.run([LIGHTHOUSE_CMD, "--version"], capture_output=True, text=True, **_subprocess_kwargs())
         if result.returncode != 0:
             check_npm_environment()
             raise RuntimeError("❌ Lighthouse установлен некорректно или недоступен.")
@@ -82,7 +95,7 @@ def check_npm_environment():
     Проверяет наличие npm и Node.js в системе.
     """
     try:
-        result = subprocess.run(["npm", "--version"], capture_output=True, text=True)
+        result = subprocess.run(["npm", "--version"], capture_output=True, text=True, **_subprocess_kwargs())
         if result.returncode == 0:
             print(f"[INFO] npm установлен: {result.stdout.strip()}")
         else:
@@ -91,7 +104,7 @@ def check_npm_environment():
         raise RuntimeError(f"[ERROR] Ошибка при проверке npm: {e}")
 
     try:
-        result = subprocess.run(["node", "--version"], capture_output=True, text=True)
+        result = subprocess.run(["node", "--version"], capture_output=True, text=True, **_subprocess_kwargs())
         if result.returncode == 0:
             print(f"[INFO] Node.js установлен: {result.stdout.strip()}")
         else:
@@ -208,7 +221,7 @@ def run_local_lighthouse(
             print(f"[INFO] Запуск Lighthouse для: {route_url} - {device}, итерация {iteration}")
             print(f"[DEBUG] Команда: {' '.join(command)}")
 
-            result = subprocess.run(command, capture_output=True, text=True)
+            result = subprocess.run(command, capture_output=True, text=True, **_subprocess_kwargs())
 
             if not os.path.exists(report_file):
                 if result.returncode != 0:
