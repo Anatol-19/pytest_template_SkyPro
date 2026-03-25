@@ -220,14 +220,26 @@ def _load_jobs_state() -> Dict[str, Dict[str, Any]]:
 
 def _save_jobs_state(data: Dict[str, Dict[str, Any]]) -> None:
     _ensure_jobs_state_dir()
-    tmp_path = f"{JOBS_STATE_PATH}.tmp"
+    tmp_path = f"{JOBS_STATE_PATH}.{os.getpid()}.tmp"
+    for attempt in range(3):
+        try:
+            with open(tmp_path, "w", encoding="utf-8") as file:
+                json.dump(data, file, ensure_ascii=False, indent=2)
+            os.replace(tmp_path, JOBS_STATE_PATH)
+            return
+        except PermissionError:
+            if attempt < 2:
+                time.sleep(0.5 * (attempt + 1))
+            else:
+                _log_exception("Failed to save jobs state after retries")
+        except Exception:
+            _log_exception("Failed to save jobs state")
+            break
+    # Не падаем — job продолжит работу даже если state не сохранился
     try:
-        with open(tmp_path, "w", encoding="utf-8") as file:
-            json.dump(data, file, ensure_ascii=False, indent=2)
-        os.replace(tmp_path, JOBS_STATE_PATH)
-    except Exception:
-        _log_exception("Failed to save jobs state")
-        raise
+        os.remove(tmp_path)
+    except OSError:
+        pass
 
 
 def _prune_jobs_state(data: Dict[str, Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:

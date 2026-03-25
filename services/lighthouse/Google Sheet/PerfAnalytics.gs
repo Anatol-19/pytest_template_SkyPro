@@ -164,7 +164,7 @@ function renderProjectDashboard(sheet, project, allRuns, allRoutes, allStability
   if (mode === 'SPRINT') {
     renderContextOverviewBlock(sheet, LAYOUT.CONTEXT.row, context, thresholds);
     renderAlertsBlock(sheet, LAYOUT.ALERTS.row, context.latest, previous, effectiveRoutes, projectRoutes, effectiveStabilityRows, thresholds, 'БЛОК 2 — АЛЕРТЫ');
-    renderSprintImpactBlock(sheet, LAYOUT.SPRINT_IMPACT.row, project, filters, effectiveRuns, effectiveRoutes, thresholds, 'БЛОК 3 — SPRINT IMPACT');
+    renderSprintImpactBlock(sheet, LAYOUT.SPRINT_IMPACT.row, project, filters, effectiveRuns, projectRoutes, thresholds, 'БЛОК 3 — SPRINT IMPACT');
     renderTrendBlock(sheet, LAYOUT.TREND.row, trendRuns, effectiveStabilityRows, effectiveRoutes);
     renderWorstPagesBlock(sheet, LAYOUT.WORST_PAGES.row, effectiveRoutes, thresholds, 'БЛОК 4 — ХУДШИЕ СТРАНИЦЫ');
     renderDeviceSplitBlock(sheet, LAYOUT.DEVICE_SPLIT.row, effectiveRoutes, thresholds, 'БЛОК 5 — DESKTOP VS MOBILE');
@@ -2108,20 +2108,40 @@ function renderSprintImpactBlock(sheet, row, project, filters, allRuns, allRoute
   row = renderBlockHeader(sheet, row, title || 'БЛОК — SPRINT IMPACT', 8);
   const sprintConfig = readSprintMetadata(sheet);
 
-  // Находим routes с тегами before/after для текущего sprint
-  const sprintRoutes = allRoutes.filter(route => {
-    if (sprintConfig && sprintConfig.activeSprint) {
-      if (toText(route.sprint).trim() !== sprintConfig.activeSprint) return false;
-    }
-    return true;
+  // after = записи текущего спринта с тегом after
+  // before = (1) записи текущего спринта с тегом before, ИЛИ
+  //          (2) fallback: записи предыдущего инкремента (previousIncrement) — любой тег
+  const currentSprint = (sprintConfig && sprintConfig.currentSprint) || '';
+  const prevIncrement = (sprintConfig && sprintConfig.previousIncrement) || '';
+
+  // after: ищем в текущем спринте записи с тегом after
+  let afterRoutes = allRoutes.filter(r => {
+    if (currentSprint && toText(r.sprint).trim() !== currentSprint) return false;
+    return hasTagToken_(r.tag, 'after');
   });
+  // Если нет записей текущего спринта — берём последний run_id по каждому env+device
+  if (!afterRoutes.length) {
+    afterRoutes = allRoutes.filter(r => hasTagToken_(r.tag, 'after'));
+  }
 
-  // Теги могут быть составными (напр. "after,Regress") — ищем наличие before/after
-  const beforeRoutes = sprintRoutes.filter(r => hasTagToken_(r.tag, 'before'));
-  const afterRoutes = sprintRoutes.filter(r => hasTagToken_(r.tag, 'after'));
+  // before: сначала ищем записи текущего спринта с тегом before
+  let beforeRoutes = allRoutes.filter(r => {
+    if (currentSprint && toText(r.sprint).trim() !== currentSprint) return false;
+    return hasTagToken_(r.tag, 'before');
+  });
+  // Fallback: если нет before в текущем спринте — берём ВСЕ записи предыдущего инкремента
+  if (!beforeRoutes.length && prevIncrement) {
+    beforeRoutes = allRoutes.filter(r => toText(r.sprint).trim() === prevIncrement);
+  }
+  // Fallback 2: если и предыдущего инкремента нет — берём предпоследний run_id по env+device
+  const usePreviousRunFallback = !beforeRoutes.length;
+  let previousRunMetrics = {};
+  if (usePreviousRunFallback) {
+    previousRunMetrics = buildPreviousRunByEnvDevice_(allRoutes);
+  }
 
-  if (!beforeRoutes.length && !afterRoutes.length) {
-    sheet.getRange(row, 1).setValue('Нет данных before/after для текущего спринта.').setFontStyle('italic');
+  if (!afterRoutes.length && !beforeRoutes.length && !Object.keys(previousRunMetrics).length) {
+    sheet.getRange(row, 1).setValue('Нет данных для сравнения.').setFontStyle('italic');
     return startRow + LAYOUT.SPRINT_IMPACT.height;
   }
 
@@ -2129,16 +2149,24 @@ function renderSprintImpactBlock(sheet, row, project, filters, allRuns, allRoute
   const envDeviceKeys = new Set();
   beforeRoutes.forEach(r => envDeviceKeys.add(`${normalizeEnvironment(r.environment)}|${r.device.toLowerCase()}`));
   afterRoutes.forEach(r => envDeviceKeys.add(`${normalizeEnvironment(r.environment)}|${r.device.toLowerCase()}`));
+  Object.keys(previousRunMetrics).forEach(k => envDeviceKeys.add(k));
 
   const impactRows = [];
   envDeviceKeys.forEach(key => {
     const parts = key.split('|');
     const env = parts[0];
     const device = parts[1];
-    const bRoutes = beforeRoutes.filter(r => normalizeEnvironment(r.environment) === env && r.device.toLowerCase() === device);
     const aRoutes = afterRoutes.filter(r => normalizeEnvironment(r.environment) === env && r.device.toLowerCase() === device);
-    const bMetrics = aggregateRouteMetrics(bRoutes);
     const aMetrics = aggregateRouteMetrics(aRoutes);
+
+    let bMetrics;
+    if (usePreviousRunFallback) {
+      bMetrics = previousRunMetrics[key] || { lcp: null, inp: null, cls: null, ttfb: null };
+    } else {
+      const bRoutes = beforeRoutes.filter(r => normalizeEnvironment(r.environment) === env && r.device.toLowerCase() === device);
+      bMetrics = aggregateRouteMetrics(bRoutes);
+    }
+
     const lcpDelta = metricDelta(aMetrics.lcp, bMetrics.lcp);
     const inpDelta = metricDelta(aMetrics.inp, bMetrics.inp);
     const clsDelta = metricDelta(aMetrics.cls, bMetrics.cls);
