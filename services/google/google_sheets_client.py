@@ -2,6 +2,7 @@ import json
 import os
 import random
 import time
+import threading
 
 import gspread
 import numpy as np
@@ -14,14 +15,43 @@ FAILED_FLUSH_DIR = os.path.join(
     "Reports", "reports_lighthouse",
 )
 
+# Межпроцессный rate limiter для Google Sheets API через lock-файл
+_SHEETS_LOCK_DIR = os.path.join(FAILED_FLUSH_DIR, ".sheets_locks")
+_SHEETS_MIN_INTERVAL = 1.5  # минимум секунд между Sheets API вызовами
+
+
+def _sheets_rate_limit():
+    """Простой межпроцессный rate limiter через timestamp файл."""
+    os.makedirs(_SHEETS_LOCK_DIR, exist_ok=True)
+    ts_file = os.path.join(_SHEETS_LOCK_DIR, "last_call.txt")
+    for _ in range(30):  # макс 45 секунд ожидания
+        try:
+            now = time.time()
+            if os.path.exists(ts_file):
+                try:
+                    with open(ts_file, "r") as f:
+                        last = float(f.read().strip())
+                    elapsed = now - last
+                    if elapsed < _SHEETS_MIN_INTERVAL:
+                        time.sleep(_SHEETS_MIN_INTERVAL - elapsed + random.uniform(0.1, 0.5))
+                except (ValueError, OSError):
+                    pass
+            with open(ts_file, "w") as f:
+                f.write(str(time.time()))
+            return
+        except OSError:
+            time.sleep(random.uniform(0.3, 0.8))
+
 
 def _retry_sheets_call(func, max_retries=5, base_delay=2.0):
     """
     Обёртка для вызовов Google Sheets API с retry и exponential backoff.
     Ретраит при APIError (429, 5xx) и общих сетевых ошибках.
+    Включает межпроцессный rate limiting.
     """
     for attempt in range(max_retries + 1):
         try:
+            _sheets_rate_limit()
             return func()
         except APIError as e:
             status = e.response.status_code if hasattr(e, 'response') and e.response else 500
@@ -51,6 +81,8 @@ class GoogleSheetsClient:
         self.sheet = self._open_or_create_sheet(worksheet_name)
         self._batch_rows: List[List[Any]] = []
         self._headers: Optional[List[str]] = None
+        self._headers_cached: bool = False
+        self._next_row: Optional[int] = None  # кэш позиции для append
 
     def _authorize(self):
         scopes = ["https://www.googleapis.com/auth/spreadsheets"]
@@ -80,12 +112,22 @@ class GoogleSheetsClient:
 
         def _do_flush():
             print(f"[INFO] Запись {len(rows_to_write)} строк в таблицу '{self.worksheet_name}'...")
-            existing = self.sheet.get_all_values()
-            start_row = max(4, len(existing) + 1)
+            # Определяем start_row: используем кэш или делаем один лёгкий запрос
+            if self._next_row is not None:
+                start_row = self._next_row
+            else:
+                # Один вызов вместо get_all_values() — считаем только кол-во строк
+                try:
+                    col_a = self.sheet.col_values(1)
+                    start_row = max(4, len(col_a) + 1)
+                except Exception:
+                    start_row = 4
             max_len = len(self._headers or [])
             padded = [r + [""] * (max_len - len(r)) for r in rows_to_write]
             range_start = f"A{start_row}"
             self.sheet.update(range_start, padded, value_input_option="USER_ENTERED")
+            # Обновляем кэш позиции
+            self._next_row = start_row + len(padded)
             print(f"[INFO] Успешно записано с {range_start} ({len(padded)} строк).")
 
         try:
@@ -215,6 +257,12 @@ class GoogleSheetsClient:
             raise
 
     def _get_or_create_headers(self, data: Dict[str, Any]) -> List[str]:
+        # Возвращаем кэш если headers уже загружены и все ключи присутствуют
+        if self._headers_cached and self._headers:
+            missing = [k for k in data.keys() if k not in self._headers]
+            if not missing:
+                return self._headers
+
         def _do_headers():
             try:
                 current_headers = self.sheet.row_values(1)
@@ -231,7 +279,9 @@ class GoogleSheetsClient:
                 return updated
             return current_headers
 
-        return _retry_sheets_call(_do_headers)
+        result = _retry_sheets_call(_do_headers)
+        self._headers_cached = True
+        return result
 
     def _normalize_data(self, data: Dict[str, Any]) -> Dict[str, Any]:
         normalized = {}

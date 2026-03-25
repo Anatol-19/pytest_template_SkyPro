@@ -291,12 +291,13 @@ class SpeedtestService:
                                          environment=self.environment, full_url=route_url,
                                          iterations=n_iteration, run_id=run_id, tag=tag, sprint=sprint)
 
-                google_client.flush()
                 succeeded.append(route_key)
             except Exception as e:
                 print(f"[ERROR] Ошибка при обработке роута '{route_key}': {e}")
                 failed.append({"route": route_key, "error": str(e)})
 
+        # Один flush в конце — все строки записываются разом
+        google_client.flush()
         return {"succeeded": succeeded, "failed": failed}
 
     def run_api_aggregated_tests(self, route_keys: Optional[List[str]], device_type: str,
@@ -370,12 +371,13 @@ class SpeedtestService:
                                          environment=self.environment, full_url=route_url,
                                          iterations=n_iteration, run_id=run_id, tag=tag, sprint=sprint)
 
-                google_client.flush()
                 succeeded.append(route_key)
             except Exception as e:
                 print(f"[ERROR] Ошибка при обработке роута '{route_key}': {e}")
                 failed.append({"route": route_key, "error": str(e)})
 
+        # Один flush в конце — все строки записываются разом
+        google_client.flush()
         return {"succeeded": succeeded, "failed": failed}
 
     def run_crux_data_collection(self, route_keys: Optional[List[str]], device_type: str,
@@ -451,12 +453,13 @@ class SpeedtestService:
                         sprint=sprint,
                     )
 
-                google_client.flush()
                 succeeded.append(route_key)
             except Exception as e:
                 print(f"[ERROR] Ошибка при обработке CrUX роута '{route_key}': {e}")
                 failed.append({"route": route_key, "error": str(e)})
 
+        # Один flush в конце — все строки записываются разом
+        google_client.flush()
         return {"succeeded": succeeded, "failed": failed}
 
 if __name__ == "__main__":
