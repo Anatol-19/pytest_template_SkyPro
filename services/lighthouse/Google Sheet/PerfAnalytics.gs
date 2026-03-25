@@ -162,10 +162,14 @@ function renderProjectDashboard(sheet, project, allRuns, allRoutes, allStability
   const context = buildContextMetrics(project, filters, latest, effectiveRuns, effectiveRoutes, sprintConfig);
 
   if (mode === 'SPRINT') {
-    renderSprintImpactBlock(sheet, LAYOUT.SPRINT_IMPACT.row, project, filters, effectiveRuns, effectiveRoutes, thresholds, 'БЛОК 1 — SPRINT IMPACT');
+    renderContextOverviewBlock(sheet, LAYOUT.CONTEXT.row, context, thresholds);
+    renderAlertsBlock(sheet, LAYOUT.ALERTS.row, context.latest, previous, effectiveRoutes, effectiveStabilityRows, thresholds, 'БЛОК 2 — АЛЕРТЫ');
+    renderSprintImpactBlock(sheet, LAYOUT.SPRINT_IMPACT.row, project, filters, effectiveRuns, effectiveRoutes, thresholds, 'БЛОК 3 — SPRINT IMPACT');
     renderTrendBlock(sheet, LAYOUT.TREND.row, trendRuns, effectiveStabilityRows, effectiveRoutes);
-    renderWorstPagesBlock(sheet, LAYOUT.WORST_PAGES.row, effectiveRoutes, thresholds, 'БЛОК 2 — ХУДШИЕ СТРАНИЦЫ');
-    renderAlertsBlock(sheet, LAYOUT.ALERTS.row, context.latest, previous, effectiveRoutes, effectiveStabilityRows, thresholds, 'БЛОК 3 — АЛЕРТЫ');
+    renderWorstPagesBlock(sheet, LAYOUT.WORST_PAGES.row, effectiveRoutes, thresholds, 'БЛОК 4 — ХУДШИЕ СТРАНИЦЫ');
+    renderDeviceSplitBlock(sheet, LAYOUT.DEVICE_SPLIT.row, effectiveRoutes, thresholds, 'БЛОК 5 — DESKTOP VS MOBILE');
+    renderDiagnosticsBlock(sheet, LAYOUT.DIAGNOSTICS.row, context.latest, thresholds);
+    renderRouteHealthBlock(sheet, LAYOUT.ROUTE_HEALTH.row, effectiveRoutes, stabilityMap, thresholds);
     return;
   }
 
@@ -234,7 +238,9 @@ function matchesSprintContext_(record, sprintConfig) {
   if (!sprintConfig.hasAnyRollout) {
     return true;
   }
-  return toText(record.tag).trim().toLowerCase() === getSprintTagForEnvironment_(record.environment, sprintConfig);
+  // Поддержка составных тегов: "after,Regress" содержит "after"
+  const expectedTag = getSprintTagForEnvironment_(record.environment, sprintConfig);
+  return hasTagToken_(record.tag, expectedTag);
 }
 
 function ensurePerfAnalyticsTriggers(ss) {
@@ -2072,30 +2078,53 @@ function renderSprintImpactBlock(sheet, row, project, filters, allRuns, allRoute
     const lcpDelta = metricDelta(aMetrics.lcp, bMetrics.lcp);
     const inpDelta = metricDelta(aMetrics.inp, bMetrics.inp);
     const clsDelta = metricDelta(aMetrics.cls, bMetrics.cls);
+    const ttfbDelta = metricDelta(aMetrics.ttfb, bMetrics.ttfb);
 
+    // Результат по всем Core Web Vitals (LCP, INP, CLS)
     let result = 'STABLE';
-    if (lcpDelta !== null && lcpDelta < -10) result = 'IMPROVED';
-    else if (lcpDelta !== null && lcpDelta > 10) result = 'REGRESSION';
+    const hasRegression = (lcpDelta !== null && lcpDelta > 10) || (inpDelta !== null && inpDelta > 10) || (clsDelta !== null && clsDelta > 10);
+    const hasImprovement = (lcpDelta !== null && lcpDelta < -10) || (inpDelta !== null && inpDelta < -10) || (clsDelta !== null && clsDelta < -10);
+    if (hasRegression) result = 'REGRESSION';
+    else if (hasImprovement) result = 'IMPROVED';
 
-    impactRows.push({ env, device, lcpBefore: bMetrics.lcp, lcpAfter: aMetrics.lcp, lcpDelta, inpDelta, clsDelta, result });
+    impactRows.push({
+      env, device,
+      lcpBefore: bMetrics.lcp, lcpAfter: aMetrics.lcp, lcpDelta,
+      inpBefore: bMetrics.inp, inpAfter: aMetrics.inp, inpDelta,
+      clsBefore: bMetrics.cls, clsAfter: aMetrics.cls, clsDelta,
+      ttfbDelta,
+      result,
+    });
   });
 
-  sheet.getRange(row, 1, 1, 8).setValues([['Контур', 'Устройство', 'LCP before', 'LCP after', 'Δ LCP', 'Δ INP', 'Δ CLS', 'Результат']]).setFontWeight('bold').setBackground('#ECEFF1');
+  const headers = ['Контур', 'Устройство', 'LCP before', 'LCP after', 'Δ LCP', 'INP before', 'INP after', 'Δ INP', 'CLS before', 'CLS after', 'Δ CLS', 'Δ TTFB', 'Результат'];
+  sheet.getRange(row, 1, 1, headers.length).setValues([headers]).setFontWeight('bold').setBackground('#ECEFF1');
   row++;
   const dataStartRow = row;
   impactRows.forEach(item => {
     const resultColor = item.result === 'IMPROVED' ? STATUS_COLORS.GOOD : (item.result === 'REGRESSION' ? STATUS_COLORS.POOR : STATUS_COLORS.NI);
-    sheet.getRange(row, 1, 1, 8).setValues([[
+    sheet.getRange(row, 1, 1, headers.length).setValues([[
       item.env,
       item.device,
       item.lcpBefore !== null ? formatMetricValue('lcp', item.lcpBefore) : '—',
       item.lcpAfter !== null ? formatMetricValue('lcp', item.lcpAfter) : '—',
       item.lcpDelta !== null ? formatPercent(item.lcpDelta) : '—',
+      item.inpBefore !== null ? formatMetricValue('inp', item.inpBefore) : '—',
+      item.inpAfter !== null ? formatMetricValue('inp', item.inpAfter) : '—',
       item.inpDelta !== null ? formatPercent(item.inpDelta) : '—',
+      item.clsBefore !== null ? (item.clsBefore).toFixed(3) : '—',
+      item.clsAfter !== null ? (item.clsAfter).toFixed(3) : '—',
       item.clsDelta !== null ? formatPercent(item.clsDelta) : '—',
+      item.ttfbDelta !== null ? formatPercent(item.ttfbDelta) : '—',
       item.result,
     ]]);
-    sheet.getRange(row, 8).setBackground(resultColor);
+    colorMetricCell_(sheet, row, 3, 'lcp', item.lcpBefore, thresholds);
+    colorMetricCell_(sheet, row, 4, 'lcp', item.lcpAfter, thresholds);
+    colorMetricCell_(sheet, row, 6, 'inp', item.inpBefore, thresholds);
+    colorMetricCell_(sheet, row, 7, 'inp', item.inpAfter, thresholds);
+    colorMetricCell_(sheet, row, 9, 'cls', item.clsBefore, thresholds);
+    colorMetricCell_(sheet, row, 10, 'cls', item.clsAfter, thresholds);
+    sheet.getRange(row, headers.length).setBackground(resultColor);
     row++;
   });
 
@@ -2194,8 +2223,3 @@ function insertGroupedBarChart(sheet, range, row, column, title) {
     .build();
   sheet.insertChart(chart);
 }
-
-
-
-
-

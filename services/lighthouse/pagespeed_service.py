@@ -216,7 +216,7 @@ class SpeedtestService:
 
         try:
 
-            return GoogleSheetsClient(
+            client = GoogleSheetsClient(
 
                 credentials_path=str(credentials_path),
 
@@ -225,6 +225,14 @@ class SpeedtestService:
                 worksheet_name=self.worksheet_name
 
             )
+
+            # Автоматически отправляем ранее сохранённые данные при инициализации
+            try:
+                client.retry_failed_flushes()
+            except Exception as retry_err:
+                print(f"[WARNING] Retry failed flushes при старте: {retry_err}")
+
+            return client
 
         except RefreshError as e:
 
@@ -297,7 +305,10 @@ class SpeedtestService:
                 failed.append({"route": route_key, "error": str(e)})
 
         # Один flush в конце — все строки записываются разом
-        google_client.flush()
+        try:
+            google_client.flush()
+        except Exception as e:
+            print(f"[WARNING] Flush не удался, данные сохранены в fallback: {e}")
         return {"succeeded": succeeded, "failed": failed}
 
     def run_api_aggregated_tests(self, route_keys: Optional[List[str]], device_type: str,
@@ -377,7 +388,10 @@ class SpeedtestService:
                 failed.append({"route": route_key, "error": str(e)})
 
         # Один flush в конце — все строки записываются разом
-        google_client.flush()
+        try:
+            google_client.flush()
+        except Exception as e:
+            print(f"[WARNING] Flush не удался, данные сохранены в fallback: {e}")
         return {"succeeded": succeeded, "failed": failed}
 
     def run_crux_data_collection(self, route_keys: Optional[List[str]], device_type: str,
@@ -459,7 +473,10 @@ class SpeedtestService:
                 failed.append({"route": route_key, "error": str(e)})
 
         # Один flush в конце — все строки записываются разом
-        google_client.flush()
+        try:
+            google_client.flush()
+        except Exception as e:
+            print(f"[WARNING] Flush не удался, данные сохранены в fallback: {e}")
         return {"succeeded": succeeded, "failed": failed}
 
 if __name__ == "__main__":
