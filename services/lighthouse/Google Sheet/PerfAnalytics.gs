@@ -30,7 +30,8 @@ const LAYOUT = {
   DEVICE_SPLIT:   { row: 123, height: 18 },
   DIAGNOSTICS:    { row: 141, height: 12 },
   ROUTE_HEALTH:   { row: 153, height: 30 },
-  EXPERIMENTS:    { row: 183, height: 20 },
+  EXPERIMENTS:       { row: 183, height: 20 },
+  METRIC_BREAKDOWN:  { row: 203, height: 80 },
 };
 
 // Зоны графиков (фиксированные позиции)
@@ -170,6 +171,7 @@ function renderProjectDashboard(sheet, project, allRuns, allRoutes, allStability
     renderDeviceSplitBlock(sheet, LAYOUT.DEVICE_SPLIT.row, effectiveRoutes, thresholds, 'БЛОК 5 — DESKTOP VS MOBILE');
     renderDiagnosticsBlock(sheet, LAYOUT.DIAGNOSTICS.row, context.latest, thresholds);
     renderRouteHealthBlock(sheet, LAYOUT.ROUTE_HEALTH.row, effectiveRoutes, projectRoutes, stabilityMap, thresholds);
+    renderMetricBreakdownBlock(sheet, LAYOUT.METRIC_BREAKDOWN.row, projectRuns, projectRoutes, thresholds, sprintConfig);
     return;
   }
 
@@ -954,6 +956,8 @@ function findHeaderIndex(headers, candidates) {
 
 function populateFallbackThresholds(base) {
   const result = Object.assign({}, base);
+  const fromConfig = Object.keys(base);
+  const fromFallback = [];
   DEFAULT_METRIC_FALLBACKS.forEach(fallback => {
     const key = normalizeHeader(fallback.metric);
     if (!result[key]) {
@@ -962,8 +966,15 @@ function populateFallbackThresholds(base) {
         poor: fallback.poor,
         direction: fallback.direction,
       };
+      fromFallback.push(key);
     }
   });
+  if (fromConfig.length) {
+    Logger.log('[Thresholds] Из Config sheet: ' + fromConfig.join(', '));
+  }
+  if (fromFallback.length) {
+    Logger.log('[Thresholds] Из DEFAULT_METRIC_FALLBACKS (не найдены в Config): ' + fromFallback.join(', '));
+  }
   return result;
 }
 
@@ -2237,6 +2248,297 @@ function renderSprintImpactBlock(sheet, row, project, filters, allRuns, allRoute
 function hasTagToken_(tag, token) {
   if (!tag) return false;
   return toText(tag).toLowerCase().split(/[,;\s]+/).some(t => t.trim() === token.toLowerCase());
+}
+
+// ─── Metric Breakdown ───────────────────────────────────────────────────────
+
+const METRIC_BREAKDOWN_DEFS = {
+  route: [
+    { key: 'lcp',  label: 'LCP (Largest Contentful Paint)',    unit: 'ms' },
+    { key: 'inp',  label: 'INP (Interaction to Next Paint)',   unit: 'ms' },
+    { key: 'cls',  label: 'CLS (Cumulative Layout Shift)',     unit: ''   },
+    { key: 'ttfb', label: 'TTFB (Time to First Byte)',         unit: 'ms' },
+  ],
+  run: [
+    { key: 'tbt',   label: 'TBT (Total Blocking Time)',       unit: 'ms' },
+    { key: 'fcp',   label: 'FCP (First Contentful Paint)',     unit: 'ms' },
+    { key: 'speed', label: 'SI (Speed Index)',                 unit: 'ms' },
+    { key: 'tti',   label: 'TTI (Time to Interactive)',        unit: 'ms' },
+  ],
+};
+
+/**
+ * Агрегирует массив runs по одной числовой метрике, возвращая среднее.
+ */
+function aggregateRunMetric_(runs, metricKey) {
+  let sum = 0;
+  let count = 0;
+  runs.forEach(run => {
+    const v = run[metricKey];
+    if (v !== null && v !== undefined) {
+      sum += v;
+      count++;
+    }
+  });
+  if (!count) return null;
+  if (metricKey === 'cls') return parseFloat((sum / count).toFixed(3));
+  return Math.round(sum / count);
+}
+
+/**
+ * Строит before/after routes по той же логике что и Sprint Impact.
+ * Возвращает { afterRoutes, beforeRoutes, usePreviousRunFallback, previousRunLookup }
+ */
+function resolveBeforeAfterRoutes_(allRoutes, sprintConfig) {
+  const currentSprint = (sprintConfig && sprintConfig.currentSprint) || '';
+  const prevIncrement = (sprintConfig && sprintConfig.previousIncrement) || '';
+
+  let afterRoutes = allRoutes.filter(r => {
+    if (currentSprint && toText(r.sprint).trim() !== currentSprint) return false;
+    return hasTagToken_(r.tag, 'after');
+  });
+  if (!afterRoutes.length) {
+    afterRoutes = allRoutes.filter(r => hasTagToken_(r.tag, 'after'));
+  }
+
+  let beforeRoutes = allRoutes.filter(r => {
+    if (currentSprint && toText(r.sprint).trim() !== currentSprint) return false;
+    return hasTagToken_(r.tag, 'before');
+  });
+  if (!beforeRoutes.length && prevIncrement) {
+    beforeRoutes = allRoutes.filter(r => toText(r.sprint).trim() === prevIncrement);
+  }
+
+  const usePreviousRunFallback = !beforeRoutes.length;
+  let previousRunLookup = {};
+  if (usePreviousRunFallback) {
+    previousRunLookup = buildPreviousRunLookup_(allRoutes);
+  }
+
+  return { afterRoutes, beforeRoutes, usePreviousRunFallback, previousRunLookup };
+}
+
+/**
+ * Строит before/after runs по той же логике что и Sprint Impact.
+ */
+function resolveBeforeAfterRuns_(allRuns, sprintConfig) {
+  const currentSprint = (sprintConfig && sprintConfig.currentSprint) || '';
+  const prevIncrement = (sprintConfig && sprintConfig.previousIncrement) || '';
+
+  let afterRuns = allRuns.filter(r => {
+    if (currentSprint && toText(r.sprint).trim() !== currentSprint) return false;
+    return hasTagToken_(r.tag, 'after');
+  });
+  if (!afterRuns.length) {
+    afterRuns = allRuns.filter(r => hasTagToken_(r.tag, 'after'));
+  }
+
+  let beforeRuns = allRuns.filter(r => {
+    if (currentSprint && toText(r.sprint).trim() !== currentSprint) return false;
+    return hasTagToken_(r.tag, 'before');
+  });
+  if (!beforeRuns.length && prevIncrement) {
+    beforeRuns = allRuns.filter(r => toText(r.sprint).trim() === prevIncrement);
+  }
+
+  const usePreviousRunFallback = !beforeRuns.length;
+  let previousRunByEnvDevice = {};
+  if (usePreviousRunFallback) {
+    previousRunByEnvDevice = buildPreviousRunByEnvDeviceRuns_(allRuns);
+  }
+
+  return { afterRuns, beforeRuns, usePreviousRunFallback, previousRunByEnvDevice };
+}
+
+/**
+ * Для каждого env+device находим предпоследний run_id из Runs и агрегируем метрики.
+ */
+function buildPreviousRunByEnvDeviceRuns_(allRuns) {
+  const byKey = {};
+  allRuns.forEach(run => {
+    const env = normalizeEnvironment(run.environment);
+    // Runs не имеют device напрямую — определяем из runId или считаем 'all'
+    const device = 'all';
+    const key = env + '|' + device;
+    const runId = toText(run.runId).trim();
+    if (!runId) return;
+    if (!byKey[key]) byKey[key] = {};
+    if (!byKey[key][runId]) byKey[key][runId] = [];
+    byKey[key][runId].push(run);
+  });
+
+  const result = {};
+  Object.keys(byKey).forEach(key => {
+    const runIds = Object.keys(byKey[key]).sort();
+    if (runIds.length < 2) return;
+    const prevRunId = runIds[runIds.length - 2];
+    result[key] = byKey[key][prevRunId];
+  });
+  return result;
+}
+
+function renderMetricBreakdownBlock(sheet, row, projectRuns, projectRoutes, thresholds, sprintConfig) {
+  const startRow = row;
+  row = renderBlockHeader(sheet, row, 'БЛОК — METRIC BREAKDOWN', 7);
+
+  // ═══ Route-level метрики (LCP, INP, CLS, TTFB) — per page+device ═══
+  const resolved = resolveBeforeAfterRoutes_(projectRoutes, sprintConfig);
+
+  METRIC_BREAKDOWN_DEFS.route.forEach(def => {
+    // Подзаголовок метрики
+    const subRange = sheet.getRange(row, 1, 1, 7);
+    subRange.merge();
+    subRange.setValue('━━ ' + def.label + ' ━━');
+    subRange.setFontWeight('bold').setBackground('#37474F').setFontColor('#FFFFFF');
+    row++;
+
+    // Заголовок таблицы
+    sheet.getRange(row, 1, 1, 6).setValues([['Страница', 'Устройство', 'Before', 'After', 'Δ', 'Статус']])
+      .setFontWeight('bold').setBackground('#ECEFF1');
+    row++;
+
+    // Собираем все уникальные page+device из after и before
+    const pageDeviceKeys = new Set();
+    resolved.afterRoutes.forEach(r => pageDeviceKeys.add(r.page + '|' + r.device.toLowerCase()));
+    resolved.beforeRoutes.forEach(r => pageDeviceKeys.add(r.page + '|' + r.device.toLowerCase()));
+    if (resolved.usePreviousRunFallback) {
+      Object.keys(resolved.previousRunLookup).forEach(k => {
+        // key формат: page|device|env — берём page|device
+        const parts = k.split('|');
+        pageDeviceKeys.add(parts[0] + '|' + parts[1]);
+      });
+    }
+
+    let hasData = false;
+    Array.from(pageDeviceKeys).sort().forEach(key => {
+      const parts = key.split('|');
+      const page = parts[0];
+      const device = parts[1];
+
+      // After: все routes этой page+device, усреднение
+      const aRoutes = resolved.afterRoutes.filter(r => r.page === page && r.device.toLowerCase() === device);
+      const afterAgg = aggregateRouteMetrics(aRoutes);
+      const afterVal = afterAgg[def.key];
+
+      // Before
+      let beforeVal = null;
+      if (resolved.usePreviousRunFallback) {
+        // previousRunLookup ключи: page|device|env — нужны ВСЕ envs
+        Object.keys(resolved.previousRunLookup).forEach(lk => {
+          const lParts = lk.split('|');
+          if (lParts[0] === page && lParts[1] === device) {
+            const v = resolved.previousRunLookup[lk][def.key];
+            if (v !== null && v !== undefined && beforeVal === null) {
+              beforeVal = v;
+            }
+          }
+        });
+      } else {
+        const bRoutes = resolved.beforeRoutes.filter(r => r.page === page && r.device.toLowerCase() === device);
+        const beforeAgg = aggregateRouteMetrics(bRoutes);
+        beforeVal = beforeAgg[def.key];
+      }
+
+      if (afterVal === null && beforeVal === null) return;
+      hasData = true;
+
+      const delta = metricDelta(afterVal, beforeVal);
+      const status = assessMetricStatus(def.key, afterVal, thresholds);
+      const statusLabel = status.status === 'GOOD' ? '✓ GOOD' : (status.status === 'POOR' ? '✗ POOR' : '⚠ NI');
+
+      sheet.getRange(row, 1, 1, 6).setValues([[
+        page,
+        device,
+        formatMetricValue(def.key, beforeVal),
+        formatMetricValue(def.key, afterVal),
+        delta !== null ? formatPercent(delta) : '—',
+        statusLabel,
+      ]]);
+      colorMetricCell_(sheet, row, 3, def.key, beforeVal, thresholds);
+      colorMetricCell_(sheet, row, 4, def.key, afterVal, thresholds);
+      sheet.getRange(row, 6).setBackground(status.color);
+      row++;
+    });
+
+    if (!hasData) {
+      sheet.getRange(row, 1).setValue('Нет данных').setFontStyle('italic');
+      row++;
+    }
+    row++; // пустая строка между метриками
+  });
+
+  // ═══ Run-level метрики (TBT, FCP, SI, TTI) — per env+device ═══
+  const resolvedRuns = resolveBeforeAfterRuns_(projectRuns, sprintConfig);
+
+  METRIC_BREAKDOWN_DEFS.run.forEach(def => {
+    const subRange = sheet.getRange(row, 1, 1, 7);
+    subRange.merge();
+    subRange.setValue('━━ ' + def.label + ' — данные из Runs ━━');
+    subRange.setFontWeight('bold').setBackground('#37474F').setFontColor('#FFFFFF');
+    row++;
+
+    sheet.getRange(row, 1, 1, 6).setValues([['Контур', 'Устройство', 'Before', 'After', 'Δ', 'Статус']])
+      .setFontWeight('bold').setBackground('#ECEFF1');
+    row++;
+
+    // Группируем runs по env (device='all' для runs)
+    const envKeys = new Set();
+    resolvedRuns.afterRuns.forEach(r => envKeys.add(normalizeEnvironment(r.environment)));
+    resolvedRuns.beforeRuns.forEach(r => envKeys.add(normalizeEnvironment(r.environment)));
+    if (resolvedRuns.usePreviousRunFallback) {
+      Object.keys(resolvedRuns.previousRunByEnvDevice).forEach(k => envKeys.add(k.split('|')[0]));
+    }
+
+    let hasData = false;
+    Array.from(envKeys).sort().forEach(env => {
+      const device = 'all';
+      const key = env + '|' + device;
+
+      // After: усреднение всех runs этого env
+      const aRuns = resolvedRuns.afterRuns.filter(r => normalizeEnvironment(r.environment) === env);
+      const afterVal = aggregateRunMetric_(aRuns, def.key);
+
+      // Before
+      let beforeVal = null;
+      if (resolvedRuns.usePreviousRunFallback) {
+        const prevRuns = resolvedRuns.previousRunByEnvDevice[key];
+        if (prevRuns) {
+          beforeVal = aggregateRunMetric_(prevRuns, def.key);
+        }
+      } else {
+        const bRuns = resolvedRuns.beforeRuns.filter(r => normalizeEnvironment(r.environment) === env);
+        beforeVal = aggregateRunMetric_(bRuns, def.key);
+      }
+
+      if (afterVal === null && beforeVal === null) return;
+      hasData = true;
+
+      const delta = metricDelta(afterVal, beforeVal);
+      const status = assessMetricStatus(def.key, afterVal, thresholds);
+      const statusLabel = status.status === 'GOOD' ? '✓ GOOD' : (status.status === 'POOR' ? '✗ POOR' : '⚠ NI');
+
+      sheet.getRange(row, 1, 1, 6).setValues([[
+        env,
+        device,
+        formatMetricValue(def.key, beforeVal),
+        formatMetricValue(def.key, afterVal),
+        delta !== null ? formatPercent(delta) : '—',
+        statusLabel,
+      ]]);
+      colorMetricCell_(sheet, row, 3, def.key, beforeVal, thresholds);
+      colorMetricCell_(sheet, row, 4, def.key, afterVal, thresholds);
+      sheet.getRange(row, 6).setBackground(status.color);
+      row++;
+    });
+
+    if (!hasData) {
+      sheet.getRange(row, 1).setValue('Нет данных').setFontStyle('italic');
+      row++;
+    }
+    row++;
+  });
+
+  return startRow + LAYOUT.METRIC_BREAKDOWN.height;
 }
 
 function renderExperimentsBlock(sheet, row, runs, thresholds) {
