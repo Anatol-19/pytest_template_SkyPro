@@ -163,18 +163,18 @@ function renderProjectDashboard(sheet, project, allRuns, allRoutes, allStability
 
   if (mode === 'SPRINT') {
     renderContextOverviewBlock(sheet, LAYOUT.CONTEXT.row, context, thresholds);
-    renderAlertsBlock(sheet, LAYOUT.ALERTS.row, context.latest, previous, effectiveRoutes, effectiveStabilityRows, thresholds, 'БЛОК 2 — АЛЕРТЫ');
+    renderAlertsBlock(sheet, LAYOUT.ALERTS.row, context.latest, previous, effectiveRoutes, projectRoutes, effectiveStabilityRows, thresholds, 'БЛОК 2 — АЛЕРТЫ');
     renderSprintImpactBlock(sheet, LAYOUT.SPRINT_IMPACT.row, project, filters, effectiveRuns, effectiveRoutes, thresholds, 'БЛОК 3 — SPRINT IMPACT');
     renderTrendBlock(sheet, LAYOUT.TREND.row, trendRuns, effectiveStabilityRows, effectiveRoutes);
     renderWorstPagesBlock(sheet, LAYOUT.WORST_PAGES.row, effectiveRoutes, thresholds, 'БЛОК 4 — ХУДШИЕ СТРАНИЦЫ');
     renderDeviceSplitBlock(sheet, LAYOUT.DEVICE_SPLIT.row, effectiveRoutes, thresholds, 'БЛОК 5 — DESKTOP VS MOBILE');
     renderDiagnosticsBlock(sheet, LAYOUT.DIAGNOSTICS.row, context.latest, thresholds);
-    renderRouteHealthBlock(sheet, LAYOUT.ROUTE_HEALTH.row, effectiveRoutes, stabilityMap, thresholds);
+    renderRouteHealthBlock(sheet, LAYOUT.ROUTE_HEALTH.row, effectiveRoutes, projectRoutes, stabilityMap, thresholds);
     return;
   }
 
   renderContextOverviewBlock(sheet, LAYOUT.CONTEXT.row, context, thresholds);
-  renderAlertsBlock(sheet, LAYOUT.ALERTS.row, context.latest, previous, effectiveRoutes, effectiveStabilityRows, thresholds, 'БЛОК 2 — АЛЕРТЫ');
+  renderAlertsBlock(sheet, LAYOUT.ALERTS.row, context.latest, previous, effectiveRoutes, projectRoutes, effectiveStabilityRows, thresholds, 'БЛОК 2 — АЛЕРТЫ');
   renderCruxReferenceBlock(sheet, LAYOUT.CRUX_REF.row, context.latest, projectCruxRows);
   renderOverviewBlock(sheet, LAYOUT.OVERVIEW.row, context.latest, thresholds);
   if (shouldRenderCrossEnvBlock(filters)) {
@@ -184,7 +184,7 @@ function renderProjectDashboard(sheet, project, allRuns, allRoutes, allStability
   renderWorstPagesBlock(sheet, LAYOUT.WORST_PAGES.row, effectiveRoutes, thresholds, 'БЛОК 6 — ХУДШИЕ СТРАНИЦЫ');
   renderDeviceSplitBlock(sheet, LAYOUT.DEVICE_SPLIT.row, effectiveRoutes, thresholds, 'БЛОК 7 — DESKTOP VS MOBILE');
   renderDiagnosticsBlock(sheet, LAYOUT.DIAGNOSTICS.row, context.latest, thresholds);
-  renderRouteHealthBlock(sheet, LAYOUT.ROUTE_HEALTH.row, effectiveRoutes, stabilityMap, thresholds);
+  renderRouteHealthBlock(sheet, LAYOUT.ROUTE_HEALTH.row, effectiveRoutes, projectRoutes, stabilityMap, thresholds);
   if (mode === 'EXPERIMENT') {
     renderExperimentsBlock(sheet, LAYOUT.EXPERIMENTS.row, effectiveRuns, thresholds);
   }
@@ -853,6 +853,7 @@ function parseRouteRecord(record) {
     environment: normalizeEnvironment(environmentRaw),
     source: normalizeSource(getRecordValue(record, ['source', 'type'])),
     sprint: toText(getRecordValue(record, ['sprint'])),
+    runId: toText(getRecordValue(record, ['run_id'])),
     tag: toText(getRecordValue(record, ['tag'])),
     iterations: parseNumber(getRecordValue(record, ['iterations'])),
     avgScore: parseNumber(getRecordValue(record, ['avg_score'])),
@@ -1524,10 +1525,10 @@ function renderBlockHeader(sheet, row, title, span = 4) {
   return row + 1;
 }
 
-function renderAlertsBlock(sheet, row, latest, previous, routes, stabilityRows, thresholds, title) {
+function renderAlertsBlock(sheet, row, latest, previous, routes, allProjectRoutes, stabilityRows, thresholds, title) {
   const startRow = row;
   row = renderBlockHeader(sheet, row, title || 'БЛОК 2 — АЛЕРТЫ', 5);
-  const alerts = buildAlerts(latest, previous, routes, stabilityRows, thresholds);
+  const alerts = buildAlerts(latest, previous, routes, allProjectRoutes, stabilityRows, thresholds);
   if (!alerts.length) {
     sheet.getRange(row, 1).setValue('Нет критичных отклонений — CWV в норме.').setFontStyle('italic');
     return startRow + LAYOUT.ALERTS.height;
@@ -1545,8 +1546,11 @@ function renderAlertsBlock(sheet, row, latest, previous, routes, stabilityRows, 
   return startRow + LAYOUT.ALERTS.height;
 }
 
-function buildAlerts(latest, previous, routes, stabilityRows, thresholds) {
+function buildAlerts(latest, previous, routes, allProjectRoutes, stabilityRows, thresholds) {
   const alerts = [];
+
+  // Строим lookup предыдущих run для каждой комбинации env+device
+  const prevRunLookup = buildPreviousRunByEnvDevice_(allProjectRoutes);
 
   // Группируем routes по environment + device для Smart Alerts
   const groups = {};
@@ -1568,10 +1572,11 @@ function buildAlerts(latest, previous, routes, stabilityRows, thresholds) {
     const highestRoute = groupRoutes.slice().sort((a, b) => (b.lcp || 0) - (a.lcp || 0))[0];
     const scopeLabel = summarizeList_(groupRoutes.map(r => r.page), 3);
 
-    // Находим previous для этой группы
-    const prevLcp = previous ? previous.lcp : null;
-    const prevInp = previous ? previous.inp : null;
-    const prevTtfb = previous ? previous.ttfb : null;
+    // Дельты: предыдущий run для ЭТОГО env+device (не глобальный previous)
+    const prevMetrics = prevRunLookup[groupKey];
+    const prevLcp = prevMetrics ? prevMetrics.lcp : null;
+    const prevInp = prevMetrics ? prevMetrics.inp : null;
+    const prevTtfb = prevMetrics ? prevMetrics.ttfb : null;
     const deltaLcp = metricDelta(groupMetrics.lcp, prevLcp);
     const deltaInp = metricDelta(groupMetrics.inp, prevInp);
     const deltaTtfb = metricDelta(groupMetrics.ttfb, prevTtfb);
@@ -1949,8 +1954,8 @@ function buildDiagnostics(latest, thresholds) {
   return diagnostics;
 }
 
-function buildDeduplicatedRouteHealth(routes, stabilityMap, thresholds) {
-  // Группировка по page + device + environment → один агрегат
+function buildDeduplicatedRouteHealth(routes, allProjectRoutes, stabilityMap, thresholds) {
+  // Группировка текущих данных по page + device + environment → один агрегат
   const grouped = {};
   routes.forEach(route => {
     const key = `${route.page}|${route.device.toLowerCase()}|${normalizeEnvironment(route.environment)}`;
@@ -1960,6 +1965,9 @@ function buildDeduplicatedRouteHealth(routes, stabilityMap, thresholds) {
     grouped[key].push(route);
   });
 
+  // Строим lookup предыдущих run_id из ВСЕХ routes проекта (не только отфильтрованных)
+  const previousRunLookup = buildPreviousRunLookup_(allProjectRoutes);
+
   return Object.keys(grouped).map(key => {
     const group = grouped[key];
     const sample = group[group.length - 1];
@@ -1968,13 +1976,10 @@ function buildDeduplicatedRouteHealth(routes, stabilityMap, thresholds) {
     const stability = stabilityMap[stabKey];
     const statusInfo = evaluateRouteHealth({ lcp: metrics.lcp, inp: metrics.inp, cls: metrics.cls, ttfb: metrics.ttfb }, stability, thresholds);
 
-    // Delta: ищем предыдущие данные для того же page+device+env (первая и последняя группы)
-    let deltaLcp = null;
-    if (group.length >= 2) {
-      const prevLcp = group[0].lcp;
-      const currLcp = group[group.length - 1].lcp;
-      deltaLcp = metricDelta(currLcp, prevLcp);
-    }
+    // Delta: находим предыдущий run_id для того же page+device+env
+    const prevMetrics = previousRunLookup[key];
+    const deltaLcp = prevMetrics ? metricDelta(metrics.lcp, prevMetrics.lcp) : null;
+    const deltaInp = prevMetrics ? metricDelta(metrics.inp, prevMetrics.inp) : null;
 
     return {
       page: sample.page,
@@ -1983,6 +1988,7 @@ function buildDeduplicatedRouteHealth(routes, stabilityMap, thresholds) {
       lcp: metrics.lcp,
       deltaLcp: deltaLcp,
       inp: metrics.inp,
+      deltaInp: deltaInp,
       cls: metrics.cls,
       status: statusInfo.status,
       statusColor: statusInfo.color,
@@ -1991,30 +1997,88 @@ function buildDeduplicatedRouteHealth(routes, stabilityMap, thresholds) {
   });
 }
 
-function renderRouteHealthBlock(sheet, row, routes, stabilityMap, thresholds) {
+function buildPreviousRunByEnvDevice_(allRoutes) {
+  // Для каждой комбинации env+device находим предпоследний run_id
+  // и возвращаем его агрегированные метрики
+  const byKey = {};
+  allRoutes.forEach(route => {
+    const key = `${normalizeEnvironment(route.environment)}|${route.device.toLowerCase()}`;
+    const runId = toText(route.runId || route.run_id || '').trim();
+    if (!runId) return;
+    if (!byKey[key]) {
+      byKey[key] = {};
+    }
+    if (!byKey[key][runId]) {
+      byKey[key][runId] = [];
+    }
+    byKey[key][runId].push(route);
+  });
+
+  const result = {};
+  Object.keys(byKey).forEach(key => {
+    const runIds = Object.keys(byKey[key]).sort();
+    if (runIds.length < 2) return;
+    const prevRunId = runIds[runIds.length - 2];
+    result[key] = aggregateRouteMetrics(byKey[key][prevRunId]);
+  });
+  return result;
+}
+
+function buildPreviousRunLookup_(allRoutes) {
+  // Для каждого page+device+env находим последний и предпоследний run_id
+  // и возвращаем метрики предпоследнего run_id
+  const byKey = {};
+  allRoutes.forEach(route => {
+    const key = `${route.page}|${route.device.toLowerCase()}|${normalizeEnvironment(route.environment)}`;
+    const runId = toText(route.runId || route.run_id || '').trim();
+    if (!runId) return;
+    if (!byKey[key]) {
+      byKey[key] = {};
+    }
+    if (!byKey[key][runId]) {
+      byKey[key][runId] = [];
+    }
+    byKey[key][runId].push(route);
+  });
+
+  const result = {};
+  Object.keys(byKey).forEach(key => {
+    const runIds = Object.keys(byKey[key]).sort();
+    if (runIds.length < 2) return;
+    // Предпоследний run_id
+    const prevRunId = runIds[runIds.length - 2];
+    const prevRoutes = byKey[key][prevRunId];
+    result[key] = aggregateRouteMetrics(prevRoutes);
+  });
+  return result;
+}
+
+function renderRouteHealthBlock(sheet, row, routes, allProjectRoutes, stabilityMap, thresholds) {
   const startRow = row;
-  row = renderBlockHeader(sheet, row, 'БЛОК 9 — ЗДОРОВЬЕ РОУТОВ', 9);
+  row = renderBlockHeader(sheet, row, 'БЛОК 9 — ЗДОРОВЬЕ РОУТОВ', 10);
   if (!routes.length) {
     sheet.getRange(row, 1).setValue('Нет данных по маршрутам.');
     return startRow + LAYOUT.ROUTE_HEALTH.height;
   }
-  const dedupRows = buildDeduplicatedRouteHealth(routes, stabilityMap, thresholds);
-  sheet.getRange(row, 1, 1, 9).setValues([['Страница', 'Устройство', 'Контур', 'LCP', 'Δ LCP', 'INP', 'CLS', 'Статус', 'Причина']]).setFontWeight('bold').setBackground('#ECEFF1');
+  const dedupRows = buildDeduplicatedRouteHealth(routes, allProjectRoutes, stabilityMap, thresholds);
+  sheet.getRange(row, 1, 1, 10).setValues([['Страница', 'Устройство', 'Контур', 'LCP', 'Δ LCP', 'INP', 'Δ INP', 'CLS', 'Статус', 'Причина']]).setFontWeight('bold').setBackground('#ECEFF1');
   row++;
   dedupRows.forEach(item => {
-    sheet.getRange(row, 1, 1, 9).setValues([[
+    sheet.getRange(row, 1, 1, 10).setValues([[
       item.page,
       item.device,
       item.environment,
       item.lcp !== null ? formatMetricValue('lcp', item.lcp) : '—',
       item.deltaLcp !== null ? formatPercent(item.deltaLcp) : '—',
       item.inp !== null ? formatMetricValue('inp', item.inp) : '—',
+      item.deltaInp !== null ? formatPercent(item.deltaInp) : '—',
       item.cls !== null ? item.cls.toFixed(3) : '—',
       item.status,
       item.reason,
     ]]);
-    sheet.getRange(row, 4).setBackground(assessMetricStatus('lcp', item.lcp, thresholds).color);
-    sheet.getRange(row, 8).setBackground(item.statusColor);
+    colorMetricCell_(sheet, row, 4, 'lcp', item.lcp, thresholds);
+    colorMetricCell_(sheet, row, 6, 'inp', item.inp, thresholds);
+    sheet.getRange(row, 9).setBackground(item.statusColor);
     row++;
   });
   return startRow + LAYOUT.ROUTE_HEALTH.height;
