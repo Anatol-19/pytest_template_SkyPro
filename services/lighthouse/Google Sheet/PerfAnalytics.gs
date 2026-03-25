@@ -171,7 +171,7 @@ function renderProjectDashboard(sheet, project, allRuns, allRoutes, allStability
     renderDeviceSplitBlock(sheet, LAYOUT.DEVICE_SPLIT.row, effectiveRoutes, thresholds, 'БЛОК 5 — DESKTOP VS MOBILE');
     renderDiagnosticsBlock(sheet, LAYOUT.DIAGNOSTICS.row, context.latest, thresholds);
     renderRouteHealthBlock(sheet, LAYOUT.ROUTE_HEALTH.row, effectiveRoutes, projectRoutes, stabilityMap, thresholds);
-    renderMetricBreakdownBlock(sheet, LAYOUT.METRIC_BREAKDOWN.row, projectRuns, projectRoutes, thresholds, sprintConfig);
+    renderMetricBreakdownBlock(sheet, LAYOUT.METRIC_BREAKDOWN.row, effectiveRuns, effectiveRoutes, projectRuns, projectRoutes, thresholds, sprintConfig);
     return;
   }
 
@@ -670,6 +670,26 @@ function autoSizeColumns(sheet) {
   sheet.getRange(1, 1, 1, DASHBOARD_COLUMN_WIDTHS.length).setWrap(true);
 }
 
+const HEADER_TOKENS_ = new Set([
+  'date', 'project', 'environment', 'source', 'sprint', 'run_id', 'tag',
+  'iterations', 'pages', 'avg_score', 'p90_lcp', 'p90_inp', 'p90_cls',
+  'ttfb', 'tbt', 'fcp', 'tti', 'speed', 'page', 'device', 'type', 'tests',
+]);
+
+function isHeaderRow_(record) {
+  // Если значения нескольких ключевых полей буквально совпадают с названиями заголовков —
+  // это строка-заголовок, попавшая в данные из-за мульти-строчной шапки
+  const checks = ['run_id', 'date', 'page', 'project'];
+  let headerHits = 0;
+  for (const key of checks) {
+    const val = record[key];
+    if (val && HEADER_TOKENS_.has(normalizeHeader(val))) {
+      headerHits++;
+    }
+  }
+  return headerHits >= 2;
+}
+
 function readSheetRecords(sheet) {
   if (!sheet) {
     return [];
@@ -691,6 +711,9 @@ function readSheetRecords(sheet) {
         record[key] = row[columnIndex];
       }
     });
+    if (isHeaderRow_(record)) {
+      continue;
+    }
     records.push(record);
   }
   return records;
@@ -2008,6 +2031,36 @@ function buildDeduplicatedRouteHealth(routes, allProjectRoutes, stabilityMap, th
   });
 }
 
+/**
+ * Сортирует runIds по дате первой записи в группе (временная сортировка).
+ * runGroups — объект { runId: [records...] }, каждая запись имеет поле date.
+ */
+function sortRunIdsByDate_(runGroups) {
+  return Object.keys(runGroups).sort((a, b) => {
+    const dateA = getEarliestDate_(runGroups[a]);
+    const dateB = getEarliestDate_(runGroups[b]);
+    return dateA - dateB;
+  });
+}
+
+function getEarliestDate_(records) {
+  let earliest = Infinity;
+  records.forEach(r => {
+    const d = toDate_(r.date);
+    if (d && d.getTime() < earliest) {
+      earliest = d.getTime();
+    }
+  });
+  return earliest === Infinity ? 0 : earliest;
+}
+
+function toDate_(value) {
+  if (!value) return null;
+  if (value instanceof Date) return value;
+  const parsed = new Date(value);
+  return isNaN(parsed.getTime()) ? null : parsed;
+}
+
 function buildPreviousRunByEnvDevice_(allRoutes) {
   // Для каждой комбинации env+device находим предпоследний run_id
   // и возвращаем его агрегированные метрики
@@ -2027,7 +2080,7 @@ function buildPreviousRunByEnvDevice_(allRoutes) {
 
   const result = {};
   Object.keys(byKey).forEach(key => {
-    const runIds = Object.keys(byKey[key]).sort();
+    const runIds = sortRunIdsByDate_(byKey[key]);
     if (runIds.length < 2) return;
     const prevRunId = runIds[runIds.length - 2];
     result[key] = aggregateRouteMetrics(byKey[key][prevRunId]);
@@ -2054,9 +2107,8 @@ function buildPreviousRunLookup_(allRoutes) {
 
   const result = {};
   Object.keys(byKey).forEach(key => {
-    const runIds = Object.keys(byKey[key]).sort();
+    const runIds = sortRunIdsByDate_(byKey[key]);
     if (runIds.length < 2) return;
-    // Предпоследний run_id
     const prevRunId = runIds[runIds.length - 2];
     const prevRoutes = byKey[key][prevRunId];
     result[key] = aggregateRouteMetrics(prevRoutes);
@@ -2289,16 +2341,18 @@ function aggregateRunMetric_(runs, metricKey) {
  * Строит before/after routes по той же логике что и Sprint Impact.
  * Возвращает { afterRoutes, beforeRoutes, usePreviousRunFallback, previousRunLookup }
  */
-function resolveBeforeAfterRoutes_(allRoutes, sprintConfig) {
+function resolveBeforeAfterRoutes_(filteredRoutes, allRoutes, sprintConfig) {
+  // after — из отфильтрованных (UI filters), before — fallback из полного набора
+  if (!allRoutes) { allRoutes = filteredRoutes; }
   const currentSprint = (sprintConfig && sprintConfig.currentSprint) || '';
   const prevIncrement = (sprintConfig && sprintConfig.previousIncrement) || '';
 
-  let afterRoutes = allRoutes.filter(r => {
+  let afterRoutes = filteredRoutes.filter(r => {
     if (currentSprint && toText(r.sprint).trim() !== currentSprint) return false;
     return hasTagToken_(r.tag, 'after');
   });
   if (!afterRoutes.length) {
-    afterRoutes = allRoutes.filter(r => hasTagToken_(r.tag, 'after'));
+    afterRoutes = filteredRoutes.filter(r => hasTagToken_(r.tag, 'after'));
   }
 
   let beforeRoutes = allRoutes.filter(r => {
@@ -2319,18 +2373,19 @@ function resolveBeforeAfterRoutes_(allRoutes, sprintConfig) {
 }
 
 /**
- * Строит before/after runs по той же логике что и Sprint Impact.
+ * Строит before/after runs. after — из filtered, before fallback — из allRuns.
  */
-function resolveBeforeAfterRuns_(allRuns, sprintConfig) {
+function resolveBeforeAfterRuns_(filteredRuns, allRuns, sprintConfig) {
+  if (!allRuns) { allRuns = filteredRuns; }
   const currentSprint = (sprintConfig && sprintConfig.currentSprint) || '';
   const prevIncrement = (sprintConfig && sprintConfig.previousIncrement) || '';
 
-  let afterRuns = allRuns.filter(r => {
+  let afterRuns = filteredRuns.filter(r => {
     if (currentSprint && toText(r.sprint).trim() !== currentSprint) return false;
     return hasTagToken_(r.tag, 'after');
   });
   if (!afterRuns.length) {
-    afterRuns = allRuns.filter(r => hasTagToken_(r.tag, 'after'));
+    afterRuns = filteredRuns.filter(r => hasTagToken_(r.tag, 'after'));
   }
 
   let beforeRuns = allRuns.filter(r => {
@@ -2369,7 +2424,7 @@ function buildPreviousRunByEnvDeviceRuns_(allRuns) {
 
   const result = {};
   Object.keys(byKey).forEach(key => {
-    const runIds = Object.keys(byKey[key]).sort();
+    const runIds = sortRunIdsByDate_(byKey[key]);
     if (runIds.length < 2) return;
     const prevRunId = runIds[runIds.length - 2];
     result[key] = byKey[key][prevRunId];
@@ -2377,12 +2432,13 @@ function buildPreviousRunByEnvDeviceRuns_(allRuns) {
   return result;
 }
 
-function renderMetricBreakdownBlock(sheet, row, projectRuns, projectRoutes, thresholds, sprintConfig) {
+function renderMetricBreakdownBlock(sheet, row, effectiveRuns, effectiveRoutes, allRuns, allRoutes, thresholds, sprintConfig) {
   const startRow = row;
   row = renderBlockHeader(sheet, row, 'БЛОК — METRIC BREAKDOWN', 7);
 
   // ═══ Route-level метрики (LCP, INP, CLS, TTFB) — per page+device ═══
-  const resolved = resolveBeforeAfterRoutes_(projectRoutes, sprintConfig);
+  // after из отфильтрованных effectiveRoutes, before fallback из allRoutes
+  const resolved = resolveBeforeAfterRoutes_(effectiveRoutes, allRoutes, sprintConfig);
 
   METRIC_BREAKDOWN_DEFS.route.forEach(def => {
     // Подзаголовок метрики
@@ -2468,7 +2524,7 @@ function renderMetricBreakdownBlock(sheet, row, projectRuns, projectRoutes, thre
   });
 
   // ═══ Run-level метрики (TBT, FCP, SI, TTI) — per env+device ═══
-  const resolvedRuns = resolveBeforeAfterRuns_(projectRuns, sprintConfig);
+  const resolvedRuns = resolveBeforeAfterRuns_(effectiveRuns, allRuns, sprintConfig);
 
   METRIC_BREAKDOWN_DEFS.run.forEach(def => {
     const subRange = sheet.getRange(row, 1, 1, 7);
