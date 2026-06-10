@@ -49,6 +49,80 @@ def pytest_addoption(parser):
     parser.addoption("--docker", action="store_true", help="Run in Docker")
     parser.addoption("--contour", action="store", default="development", help="Test contour")
     parser.addoption("--test-flags", action="store", default="", help="Comma-separated test flags")
+    parser.addoption("--environment", action="store", default=None, help="Environment from URLs/base_urls.ini")
+    parser.addoption("--assets-csv", action="store", default=None, help="CSV export with expected content asset paths")
+    parser.addoption("--asset-report", action="store", default=None, help="Path for detailed content asset verification report")
+    parser.addoption("--asset-summary", action="store", default=None, help="Path for video-level content asset verification summary")
+    parser.addoption("--asset-limit", action="store", default=None, help="Limit number of video rows for content asset tests")
+    parser.addoption("--check-http", action="store_true", help="Verify signed CDN URLs with HTTP requests")
+    # --- Payment ---
+    parser.addoption("--pay-tab", action="store", default="monthly", help="Период покупки: monthly|yearly|lifetime (алиасы year/month/life)")
+    parser.addoption("--pay-slot", action="store", default="", help="Спец-цены внутри прайс-группы: пусто=Standard, N (напр. 2)=Special (type_prices_from_slot)")
+    # --- Allure ---
+    parser.addoption("--no-allure", action="store_true", help="Отключить генерацию Allure-отчёта (по умолчанию включён)")
+
+
+@pytest.fixture
+def pay_opts(request):
+    """Параметры выбора тарифа из CLI-флагов."""
+    slot = request.config.getoption("--pay-slot")
+    return {
+        "tab": request.config.getoption("--pay-tab"),
+        "slot": int(slot) if slot else None,
+    }
+
+
+def pytest_configure(config):
+    """Allure включён по умолчанию (--alluredir в pytest.ini). Флаг --no-allure отключает запись."""
+    if config.getoption("--no-allure"):
+        config.option.allure_report_dir = None
+
+
+@pytest.fixture
+def payment_env(request):
+    """Контур для payment-тестов (VRP_* секция из base_urls.ini). Default VRP_STAGE."""
+    env = request.config.getoption("--environment") or "VRP_STAGE"
+    if not env.startswith("VRP_"):
+        pytest.skip(f"Payment-тесты работают только на VRP-контурах, получено: {env}")
+    return env
+
+
+@pytest.fixture
+def payment_flow(payment_env):
+    """Собранный PaymentFlow для выбранного контура.
+
+    На teardown прикладывает сводку сессии (email, member_id, membership_uuid, invoice_uuid,
+    статус, tx) в Allure-отчёт и в лог — для сверки на фронте и в админке.
+    """
+    import logging
+
+    import allure
+    from services.payment.payment_flow import PaymentFlow
+
+    flow = PaymentFlow(environment=payment_env)
+    yield flow
+
+    s = flow.session
+    summary = (
+        f"environment: {payment_env}\n"
+        f"email:           {s.email}\n"
+        f"password:        {s.password}\n"
+        f"member_id:       {s.member_id}\n"
+        f"membership_uuid: {s.membership_uuid}\n"
+        f"member_status:   {s.member_status}\n"
+        f"invoice_uuid:    {s.invoice_uuid}\n"
+        f"price:           {getattr(s.price, 'membership_id', '')} "
+        f"pi={getattr(s.price, 'epoch_pi_code', '')} "
+        f"{getattr(s.price, 'amount', '')} {getattr(s.price, 'currency', '')}\n"
+        f"initial_tx:      {s.initial_transaction_id}\n"
+        f"last_dataplus:   {s.last_dataplus_id}\n"
+    )
+    logging.getLogger("payment").info("Сводка сессии:\n%s", summary)
+    try:
+        allure.attach(summary, name="Payment session", attachment_type=allure.attachment_type.TEXT)
+    except Exception:
+        pass  # отчёт отключён через --no-allure
+
 
 @pytest.fixture(scope="session", autouse=True)
 def initialize_config(request):

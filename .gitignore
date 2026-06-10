@@ -2,6 +2,13 @@ creds/
 **/creds/
 config_lighthouse.env
 
+### Test reports ###
+Reports/
+allure-results/
+
+### macOS ###
+.DS_Store
+
 ### Byte-compiled / optimized / DLL files ###
 __pycache__/
 *.py[cod]
