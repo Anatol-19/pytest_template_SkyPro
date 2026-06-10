@@ -1,12 +1,15 @@
 # VRP Payment Testing — ТЗ (переписано по реальной коллекции)
 
-> Дата: 2026-06-10 (ревизия 2)  
-> Источник истины: Postman-коллекция `Payment_final.json` + `run_env.json`  
-> Детальный разбор: `ai/POSTMAN_ANALYSIS.md`  
-> Реализация: `services/payment/` + `test/test_payment.py`
+> Дата: 2026-06-10 (ревизия 3)  
+> Источники истины:
+> - **Бизнес-логика** (флоу, сущности, ограничения, типы транзакций) — Docmost, конспект в `ai/VRP_BUSINESS_LOGIC.md`.
+> - **Тела запросов для VRP** — Postman-коллекция `Payment_final.json` + `run_env.json` (подтверждено живыми прогонами на TEST). Детальный разбор: `ai/POSTMAN_ANALYSIS.md`.
+> - **Команды запуска** — `ai/PAYMENT_RUN_COMMANDS.md`.
+> 
+> Реализация: `services/payment/` + `test/test_payment.py`.
 >
-> ⚠️ Предыдущая версия содержала ошибки (прямые вызовы `bs.epoch.com`, неверные URL,
-> неверная структура ответов). Этот документ исправлен по фактической коллекции.
+> ⚠️ Самая первая версия содержала ошибки (прямые вызовы `bs.epoch.com`, неверные URL,
+> неверная структура ответов). Исправлено по фактической коллекции + Docmost.
 
 ---
 
@@ -67,13 +70,20 @@ POST {base_url}/api/payment/sync-handler/epoch
 Ответ: `{ "uuid": "...", "saleEventGroup": 1, "userRegionCode": "US" }`
 
 ### 4.2 Prices
-`GET /proxy-user/api/memberships/prices[?event_id=..&event=..]`
-Ответ — **dict по категориям**:
-```json
-{ "prices": { "standard": [ {price} ], "bundle": [ {price} ] } }
 ```
-Выбор тарифа: `prices[category]` → фильтр `price_tab.slug == tab` → (если несколько) фильтр
-`price_groups[].slug == group` → берём первый.
+Standard:  GET /proxy-user/api/memberships/prices
+Special:   GET /proxy-user/api/memberships/prices?type_prices_from_slot=<N>&event_id=<sale_event_uuid>&event=
+```
+Sale Event выбирает **прайс-группу**; внутри группы каждый слот делится на Standard/Special
+(см. `ai/VRP_BUSINESS_LOGIC.md` §1). Переключение реализовано флагом `--pay-slot=<N>`.
+
+Ответ — **dict по категориям** (ключ задаёт бэкенд, на TEST обычно один — `bundle`):
+```json
+{ "prices": { "bundle": [ {price} ] } }
+```
+Выбор тарифа (`parse_prices`): категория = первая доступная → фильтр по `price_tab.slug == tab`
+с нормализацией алиасов (`year→yearly`, `month→monthly`, `life→lifetime`); если таб не найден —
+явная ошибка (не «первый молча»).
 Поля тарифа: `membership_id` (= subscr_id), `epoch_pi_code`, цена = `trial_price ?? price ?? rebill_price`,
 валюта `price_currency || currency || "USD"`.
 
@@ -120,6 +130,10 @@ Re-join (`...-url-exist`) — то же тело + `"additionalSubscriptionId": 
 Поля: `ans=YQAUPGRADE|{tx}`, `member_id`, `transaction_id`, `x_gate_type`, `x_invoice`,
 `x_membership_id`, `amount`, `currency`, `isTest=true`.
 Перед этим — Flexgrade Invoice / Easy Cancel URL, откуда берём `x_invoice`, `gate_type`, `ti_code`.
+
+> Ограничения Flexgrade (Docmost): только recurring-тарифы, нужен `ti_code` нового тарифа,
+> **не работает с Dynamic Pricing**. Расхождения по `ans` (Docmost: `YGOODTEST|OK` / `YDOWNGRADED`
+> + `x_vip_offer=Y`) — см. `ai/VRP_BUSINESS_LOGIC.md` §7, сверить при реальном тесте.
 
 ### 4.8 Invoice Status / Dashboard
 - `GET /api/payment/invoice/status?invoice_uuid=..` → `{status, purchase_type, url_redirect}`.
@@ -189,3 +203,11 @@ python run_payment_contours.py --contours VRP_DEV,VRP_TEST,VRP_STAGE
 | 8 | `additionalSubscriptionId` — строка `""`, не `[]` (re-join) | Использовать строку |
 | 9 | Refund: отрицательная сумма + `ets_ref_trans_ids=last_dataplus_id` | build_dataplus_form('C') |
 | 10 | UnZip (`api-stag.unzipvr.com`) — внешний staging-сервис из _Utils | Вне scope |
+| 11 | Sale Event = выбор **прайс-группы** (триггеры DropCard/Holiday/Expired/Affiliate/Default) | Не автоматизируем — используем текущий; `event_id` берём для special-цен |
+| 12 | Standard/Special — слоты прайс-группы через `type_prices_from_slot` | Флаг `--pay-slot=<N>` |
+| 13 | Lifetime = Non-Recurring (One Time, тип `O`) — **ребилла нет** | Lifetime → `test_lifetime_one_time`, не join+rebill |
+| 14 | Upgrade/Downgrade только recurring; Lifetime — спец-рекуррент (9999 мес); нужен Ti Code; не Dynamic Pricing | Учитывать при выборе тарифа для upgrade-теста |
+| 15 | Segpay — второй в каскаде (Epoch → Segpay); тест не реализован | См. `VRP_BUSINESS_LOGIC.md` §5 |
+| 16 | Типы `S` (token), `D` (chargeback), `retention` — не покрыты | Добавить при необходимости |
+
+Полная бизнес-логика (Epoch/Segpay/бандлы/типы транзакций) — `ai/VRP_BUSINESS_LOGIC.md`.

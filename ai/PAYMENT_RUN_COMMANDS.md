@@ -1,88 +1,71 @@
 # Payment — команды запуска
 
-> Контур по умолчанию `VRP_STAGE`. Ниже примеры на `VRP_TEST` (t.vrporn.com).
-> Меняй `--environment` на `VRP_DEV` / `VRP_STAGE` / `VRP_PROD` по необходимости.
-> Все команды из корня проекта. Allure включён по умолчанию (пишет в `Reports/allure`).
+> Контур по умолчанию `VRP_STAGE`. Меняй `--environment` на `VRP_DEV`/`VRP_TEST`/`VRP_STAGE`/`VRP_PROD`.
+> Allure включён по умолчанию (`Reports/allure`). Все транзакции `isTest=true`.
+> Полная матрица кейсов — `ai/PAYMENT_CASES_MATRIX.md`.
 
-Префикс для всех команд:
+Префикс:
 ```bash
 cd /Users/aqa/PycharmProjects/pytest_template_SkyPro
 ```
 
----
-
-## Базовые кейсы покупок (всегда с ребиллом)
-
-Все используют один тест `test_standard_join_and_rebill` (Join → FlexPost → DataPlus[I] →
-Dashboard → DataPlus[N]). Тариф выбирается флагом `--pay-tab`.
-
-### Standard прайс (кейсы 1–3)
+## Full-run (все 11 кейсов)
 
 ```bash
-# 1. Месячный тариф (standard) + ребилл
-.venv/bin/python -m pytest "test/test_payment.py::TestJoins::test_standard_join_and_rebill" \
-  --environment=VRP_TEST --pay-tab=monthly -v
+.venv/bin/python -m pytest -m payment --environment=VRP_STAGE -v
+```
+Каждая цепочка завершается Cancel→Refund (lifetime — только Refund); самосепарат чистит master+токен.
+Прогон на STAGE ~6.5 мин (11 passed, 1 skipped — re-join в бэклоге).
 
-# 2. Годовой тариф (standard) + ребилл
-.venv/bin/python -m pytest "test/test_payment.py::TestJoins::test_standard_join_and_rebill" \
-  --environment=VRP_TEST --pay-tab=yearly -v
+## По группам
 
-# 3. Lifetime тариф (standard) + ребилл
-.venv/bin/python -m pytest "test/test_payment.py::TestJoins::test_standard_join_and_rebill" \
-  --environment=VRP_TEST --pay-tab=lifetime -v
+```bash
+# Покупки (месяц/год) + rebill → Cancel→Refund
+.venv/bin/python -m pytest "test/test_payment.py::TestUserJoins::test_join_recurring" --environment=VRP_STAGE -v
+
+# Lifetime (O) → Refund
+.venv/bin/python -m pytest "test/test_payment.py::TestUserJoins::test_join_lifetime" --environment=VRP_STAGE -v
+
+# Бандлы / самосепарат (master): mono/bundle/super/self/ss/sos
+.venv/bin/python -m pytest "test/test_payment.py::TestUserJoins::test_join_bundle" --environment=VRP_STAGE -v
+
+# Изменения: upgrade / downgrade (Flexgrade)
+.venv/bin/python -m pytest "test/test_payment.py::TestUserChanges::test_change_and_rebill" --environment=VRP_STAGE -v
 ```
 
-### Special прайс (кейсы 4–6)
-
-Спец-цены берутся отдельным запросом внутри той же прайс-группы:
-`?type_prices_from_slot=N&event_id=<uuid>&event=` (`event_id` — uuid текущего Sale Event,
-подтягивается автоматически). Номер слота задаётся `--pay-slot` (пример: `2`).
+## Отдельный кейс (по id параметризации)
 
 ```bash
-# 4. Месяц special + ребилл
-.venv/bin/python -m pytest "test/test_payment.py::TestJoins::test_standard_join_and_rebill" \
-  --environment=VRP_TEST --pay-tab=monthly --pay-slot=2 -v
-
-# 5. Год special + ребилл
-.venv/bin/python -m pytest "test/test_payment.py::TestJoins::test_standard_join_and_rebill" \
-  --environment=VRP_TEST --pay-tab=yearly --pay-slot=2 -v
-
-# 6. Lifetime special + ребилл
-.venv/bin/python -m pytest "test/test_payment.py::TestJoins::test_standard_join_and_rebill" \
-  --environment=VRP_TEST --pay-tab=lifetime --pay-slot=2 -v
+.venv/bin/python -m pytest "test/test_payment.py::TestUserJoins::test_join_recurring[monthly]" --environment=VRP_STAGE -v
+.venv/bin/python -m pytest "test/test_payment.py::TestUserJoins::test_join_bundle[self-0-True]" --environment=VRP_STAGE -v
+.venv/bin/python -m pytest "test/test_payment.py::TestUserChanges::test_change_and_rebill[upgrade]" --environment=VRP_STAGE -v
 ```
 
-> Примечание по lifetime: тест делает recurring-join (DataPlus[I]+[N]) на lifetime-цене.
-> Если бэкенд для lifetime не ожидает ребилл — это как раз то, что покажет прогон, анализируй ответ.
-> (Есть отдельный `TestJoins::test_lifetime_one_time` — чистый One-Time DataPlus[O] без ребилла.)
->
-> Про `--pay-slot`: номер слота (`2` в примерах с фронта) — уточни актуальный по контуру.
-> Sale event как механизм выбора прайс-группы НЕ реализован (используем текущий).
-
----
-
-## Просмотр результата
-
-К каждому тесту в лог и в Allure пишется сводка сессии (email, member_id, membership_uuid,
-invoice_uuid, статус, tx) — для сверки на фронте и в админке.
+## Мульти-контур
 
 ```bash
-# отчёт с историей/трендом + открыть в браузере
-bash tools/allure_report.sh
+python run_payment_contours.py --contours VRP_DEV,VRP_TEST,VRP_STAGE
+```
 
-# быстрый просмотр
+## Отчёт Allure (история/тренд)
+
+```bash
+brew install allure              # однократно
+bash tools/allure_report.sh      # генерация + открыть
 bash tools/allure_report.sh --serve
 ```
 
+К каждому тесту в лог и Allure прикладывается сводка сессии (email, member_id, membership_uuid,
+invoice_uuid, статус, tx) — для сверки в админке.
+
 ---
 
-## Дорожная карта (следующие шаги)
+## Флаги выбора тарифа
 
-1. **Отдельные функциональные тесты** на операции Layer 03:
-   - Cancel
-   - Upgrade
-   - Downgrade (Easy Cancel)
-2. **Дефолтный E2E-сценарий** (одна цепочка):
-   `join → rebill → cancel → rebill → upgrade → rebill → easy-cancel → rebill → refund`
-3. **Кейсы с бандлами** (bundle-прайсы, slave-сайты).
-4. **Тест Segpay** (альтернативный платёжный шлюз помимо Epoch).
+| Флаг | Назначение |
+|---|---|
+| `--pay-tab` | monthly\|yearly\|lifetime (алиасы year/month/life) |
+| `--pay-slot` | Standard (пусто) / Special N (`type_prices_from_slot`) |
+
+Бандлы задаются в тесте через `select_tariff(event=KEY, bundle=True)` (ключи: mono/bundle/super/self/ss/sos).
+Простая покупка (`bundle=False`) игнорирует бандл sale event — дефолтный метод.

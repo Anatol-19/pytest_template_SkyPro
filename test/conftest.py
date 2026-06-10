@@ -103,20 +103,26 @@ def payment_flow(payment_env):
     yield flow
 
     s = flow.session
-    summary = (
-        f"environment: {payment_env}\n"
-        f"email:           {s.email}\n"
-        f"password:        {s.password}\n"
-        f"member_id:       {s.member_id}\n"
-        f"membership_uuid: {s.membership_uuid}\n"
-        f"member_status:   {s.member_status}\n"
-        f"invoice_uuid:    {s.invoice_uuid}\n"
+    lines = [
+        f"environment:     {payment_env}",
+        f"email:           {s.email}",
+        f"password:        {s.password}",
+        f"member_id:       {s.member_id}",
+        f"membership_uuid: {s.membership_uuid}",
+        f"member_status:   {s.member_status}",
+        f"invoice_uuid:    {s.invoice_uuid}",
         f"price:           {getattr(s.price, 'membership_id', '')} "
         f"pi={getattr(s.price, 'epoch_pi_code', '')} "
-        f"{getattr(s.price, 'amount', '')} {getattr(s.price, 'currency', '')}\n"
-        f"initial_tx:      {s.initial_transaction_id}\n"
-        f"last_dataplus:   {s.last_dataplus_id}\n"
-    )
+        f"{getattr(s.price, 'amount', '')} {getattr(s.price, 'currency', '')}",
+    ]
+    if s.is_bundle or s.is_self_separate:
+        lines.append(f"bundle:          slaves={list(s.bundle_slave_picodes.keys())} self={s.is_self_separate}")
+    if s.is_self_separate:
+        lines.append(f"token:           member_id={s.token_member_id} pi={s.token_pi_code} "
+                     f"addId={s.additional_subscription_id} amount={s.token_amount}")
+    lines.append("--- транзакции (для сверки в админке) ---")
+    lines.extend(f"  {i+1}. {t}" for i, t in enumerate(s.tx_log))
+    summary = "\n".join(lines) + "\n"
     logging.getLogger("payment").info("Сводка сессии:\n%s", summary)
     try:
         allure.attach(summary, name="Payment session", attachment_type=allure.attachment_type.TEXT)

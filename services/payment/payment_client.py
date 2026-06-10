@@ -7,6 +7,7 @@
 from urllib.parse import parse_qs, urlparse
 
 from REST.base_client import BaseApiClient
+from services.payment import config_payment as cfg
 from services.payment.fakes import money
 from services.payment.models import PaymentResult, TariffPrice
 
@@ -55,20 +56,29 @@ class PaymentClient(BaseApiClient):
     def get_prices(self, slot=None, event_id="", event=""):
         """GET /memberships/prices.
 
-        slot is None  -> Standard прайс (без query).
-        slot = N       -> Special прайс внутри той же прайс-группы
-                          (?type_prices_from_slot=N&event_id=<uuid>&event=).
-        event_id — uuid текущего Sale Event (нужен для спец-цен).
+        slot=N    -> Special прайс внутри прайс-группы (type_prices_from_slot).
+        event_id  -> привязка к конкретному Sale Event (нужен для бандлов/спец-цен).
+        Без параметров -> Standard прайс.
         """
+        params = {}
         if slot:
-            params = {"type_prices_from_slot": slot, "event_id": event_id, "event": event}
-            return self.get_json("join_prices", params=params)
-        return self.get_json("join_prices")
+            params["type_prices_from_slot"] = slot
+        if event_id:
+            params["event_id"] = event_id
+            params["event"] = event
+        return self.get_json("join_prices", params=params or None)
 
     # ---------- Layer 02: создание оплаты ----------
 
-    def create_payment_url(self, email, password, subscr_id, slave_uuids=None):
-        """POST get-recurring-payment-url (новый мембер)."""
+    def create_payment_url(self, email, password, subscr_id, slave_uuids=None,
+                           additional_subscription_id=None):
+        """POST get-recurring-payment-url (новый мембер).
+
+        Идентификация тарифа в трёх местах (как на фронте):
+          - subscr_id — UUID мастер/дефолтного тарифа,
+          - slavePriceUuids — массив UUID slave-сайтов (бандл),
+          - additionalSubscriptionId — integer id рекуррентного токена (самосепарат).
+        """
         payload = {
             "affiliate": "",
             "email": email,
@@ -80,7 +90,52 @@ class PaymentClient(BaseApiClient):
             "slavePriceUuids": slave_uuids or [],
             "uuid": "",
         }
+        if additional_subscription_id is not None:
+            payload["additionalSubscriptionId"] = additional_subscription_id
         return self.parse_payment_url(self.post_json("payment_url_new", json=payload))
+
+    def resolve_bundle(self, price, bundled_hosts):
+        """По sale_event.bundledSites и выбранному прайсу собрать состав бандла/самосепарата.
+
+        Возвращает dict:
+          slave_uuids[], slave_picodes{slug: epochPiCode}, additional_subscription_id (int|None),
+          token (dict|None: pi_code/amount/currency/recurring), is_self_separate (bool).
+        """
+        slave_uuids = []
+        slave_picodes = {}
+        additional_subscription_id = None
+        token = None
+        is_self = False
+
+        slaves = price.raw.get("price_slave_sites") or []
+        specials = price.raw.get("special_prices") or []
+
+        for host in bundled_hosts:
+            if host in cfg.SELF_HOSTS:
+                # Самосепарат: рекуррентный токен из special_prices[0] (новая логика, внутри прайса)
+                if specials:
+                    sp = specials[0]
+                    additional_subscription_id = sp.get("id")
+                    token = {
+                        "pi_code": sp.get("epochPiCode", ""),
+                        "amount": money(sp.get("priceAmount") or sp.get("rebillPrice")),
+                        "currency": sp.get("currency") or price.currency,
+                        "recurring": bool(sp.get("isRecurring")),
+                    }
+                    is_self = True
+            else:
+                slave = next((s for s in slaves if s.get("siteHost") == host), None)
+                if slave:
+                    slave_uuids.append(slave.get("uuid"))
+                    slug = host.replace(".com", "")
+                    slave_picodes[slug] = slave.get("epochPiCode", "")
+        return {
+            "slave_uuids": slave_uuids,
+            "slave_picodes": slave_picodes,
+            "additional_subscription_id": additional_subscription_id,
+            "token": token,
+            "is_self_separate": is_self,
+        }
 
     def create_payment_url_exist(self, email, password, subscr_id, additional_subscription_id=""):
         """POST get-recurring-payment-url-exist (re-join неактивного/истёкшего)."""

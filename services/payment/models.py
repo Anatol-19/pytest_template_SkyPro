@@ -49,6 +49,7 @@ class PaymentSession:
     transaction_id: str = ""
     initial_transaction_id: str = ""
     last_dataplus_id: str = ""
+    session_id: str = ""          # session_id мастер-FlexPost (токен переиспользует тот же)
 
     # После Auth + Dashboard
     atoken: str = ""
@@ -61,6 +62,21 @@ class PaymentSession:
     active_amount: str = ""
     active_currency: str = "USD"
 
-    # Бандл
+    # Журнал отправленных транзакций (для отчёта/сверки в админке)
+    tx_log: list = field(default_factory=list)
+
+    # Бандл (slave-сайты)
     is_bundle: bool = False
-    bundle_slave_picodes: dict = field(default_factory=dict)  # {slug: epoch_pi_code}
+    slave_uuids: list = field(default_factory=list)            # → slavePriceUuids
+    bundle_slave_picodes: dict = field(default_factory=dict)   # {slug: epoch_pi_code} → x_bundle_slave_{slug}
+
+    # Самосепарат (рекуррентный токен на «своём» сайте)
+    is_self_separate: bool = False
+    additional_subscription_id: Optional[int] = None           # → additionalSubscriptionId (integer special_prices[0].id)
+    token_pi_code: str = ""                                     # special_prices[0].epochPiCode
+    token_amount: str = ""                                      # special_prices[0].priceAmount/rebillPrice
+    token_currency: str = "USD"
+    token_member_id: str = ""                                   # обычно master member_id + 1
+    token_transaction_id: str = ""
+    token_initial_transaction_id: str = ""
+    token_last_dataplus_id: str = ""

@@ -40,3 +40,7 @@ INVOICE_PRODUCT_MAP = {
 # Контуры VRP, на которых разрешён мульти-прогон по умолчанию (PROD исключён намеренно)
 DEFAULT_CONTOURS = ["VRP_DEV", "VRP_TEST", "VRP_STAGE"]
 ALL_CONTOURS = ["VRP_DEV", "VRP_TEST", "VRP_STAGE", "VRP_PROD"]
+
+# Хосты «своего» сайта (для self-separated: bundledSites отдаёт голый vrporn.com).
+# Если bundled-хост входит сюда — это самосепарат (токен), а не slave-сайт.
+SELF_HOSTS = {"vrporn.com", "sg.vrporn.com", "d.vrporn.com", "t.vrporn.com"}
