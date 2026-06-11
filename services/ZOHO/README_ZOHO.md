@@ -1,107 +1,117 @@
-# 📋 ZOHO Test Plan & Report Generator
+# ZOHO Projects — сервис и MCP-сервер
 
-## 📌 Назначение
+## Структура модуля
 
-Этот сервис объединяет работу с ZOHO Projects, генерацию QA-планов и отчётов по спринту, а также интеграцию с Google Sheets.
-
-Основные цели:
-- Упрощение планирования и координации QA-команды,
-- Автоматизация получения задач, дефектов, распределения по ролям,
-- Генерация отчётности в Markdown и Google Sheets.
-
----
-
-## ⚙️ Основной функционал
-
-- 🔗 Интеграция с ZOHO Projects API:
-  - Получение задач и дефектов,
-  - Работа со статусами (blueprint),
-  - Загрузка информации о пользователях, мейлстоунах, таск-листах.
-
-- 🧠 Генерация QA-документации:
-  - 📌 План тестирования (фокус-лист, покрытие функционала, расписание),
-  - 🐞 Таблицы дефектов (в Markdown и Google Sheets),
-  - 🧾 Отчёт по спринту (закрытые/открытые задачи, владельцы, приоритеты).
-
-- 📤 Интеграция с Google Sheets:
-  - Используется модуль `google_sheets_client.py`,
-  - Креды централизуются (см. ниже).
+```
+services/ZOHO/
+├── Zoho_api_client.py   # HTTP-клиент Zoho Projects API (OAuth2)
+├── mcp_server.py        # MCP-сервер — оборачивает клиента для Claude
+├── User.py              # Модель пользователя + UserManager
+├── TaskStatus.py        # Модель статуса задачи + TaskStatusManager
+├── DefectStatus.py      # Модель статуса бага + DefectStatusManager
+├── portal_data.py       # Предзаполненные данные команды и статусов
+├── config_zoho.env      # Креды (gitignored: токены, client_id/secret)
+└── README_ZOHO.md       # Этот файл
+```
 
 ---
 
-## 📁 Структура проекта
+## ZohoAPI — что умеет
+
+Файл: `Zoho_api_client.py`
+
+Класс `ZohoAPI` — обёртка над Zoho Projects REST API v3.
+Конфигурируется из `config_zoho.env`, автоматически обновляет access_token через refresh_token.
+
+| Метод | Описание |
+|-------|----------|
+| `get_portals()` | Список порталов |
+| `get_entities_by_filter(entity_type, ...)` | Задачи / баги / milestone'ы / таск-листы с фильтрами |
+| `get_tasks_by_title(title)` | Поиск задач по названию таск-листа или milestone'а |
+| `get_tasks_by_milestone(milestone_id)` | Задачи по milestone |
+| `get_tasks_by_tasklist(tasklist_id)` | Задачи по таск-листу |
+| `get_tasks_in_date_range(start, end)` | Задачи за период |
+| `get_users(search_term)` | Список пользователей проекта |
+| `get_milestone_id_by_name(name)` | ID milestone по названию |
+| `get_tasklist_id_by_name(name)` | ID таск-листа по названию |
+| `get_bug_statuses()` | Возможные статусы багов |
+| `get_project_tags()` | Теги проекта |
+| `manage_tag(tag_id, entity_id, entity_type, action)` | Привязка / отвязка тега |
+| `create_bug(title, description, assignee_id, priority)` | Создание бага |
+| `get_blueprint_graph()` | Граф Blueprint (статусы задач) |
+
+### Конфигурация (`config_zoho.env`)
+
+```
+ZOHO_CLIENT_ID=...
+ZOHO_CLIENT_SECRET=...
+ZOHO_REFRESH_TOKEN=...       # долгоживущий, обновляется автоматически
+ZOHO_ACCESS_TOKEN=...        # перезаписывается при истечении
+ZOHO_PORTAL_NAME=vrbgroup
+ZOHO_PROJECT_ID=...
+ZOHO_REGION=com              # com / eu / in / cn
+```
+
+Токены перезаписываются в файл автоматически через `save_tokens()`.
+
+---
+
+## MCP-сервер — что добавлено
+
+Файл: `mcp_server.py`
+
+FastMCP-сервер, который оборачивает `ZohoAPI` в протокол MCP (Model Context Protocol).
+Позволяет Claude Code вызывать методы Zoho через инструменты (tools) напрямую в чате.
+
+### Инструменты сервера
+
+| Tool | Параметры | Описание |
+|------|-----------|----------|
+| `get_status` | — | Проверить подключение к API |
+| `get_tasks` | `created_after`, `created_before`, `closed_after`, `closed_before`, `owner_name`, `milestone_name`, `tasklist_name`, `limit` | Задачи с фильтрами |
+| `get_bugs` | `created_after`, `created_before`, `closed_after`, `closed_before`, `owner_name`, `limit` | Баги с фильтрами |
+| `get_milestones` | — | Все milestone'ы |
+| `get_tasklists` | — | Все таск-листы |
+| `get_users` | `search` | Пользователи проекта |
+| `get_tags` | — | Теги проекта |
+| `create_bug` | `title`, `description`, `assignee_name`, `priority` | Создать баг |
+| `get_tasks_by_title` | `title` | Задачи по имени таск-листа / milestone'а |
+| `get_bug_statuses` | — | Возможные статусы багов |
+
+### Запуск вручную
 
 ```bash
-project_root/
-├── ZOHO/                       # Работа с ZOHO API и моделями
-│   ├── ZohoAPI.py
-│   ├── User.py
-│   ├── TaskStatus.py
-│   ├── DefectStatus.py
-│   ├── portal_data.py
-│   └── config_zoho.env
-│
-├── plan_engine/                       # Генераторы и шаблоны
-│   ├── generator.py                   # Основной координирующий класс
-│   ├── templates/
-│   │   └── test_plan_template.md.j2   # Jinja2 шаблон плана
-│   └── exporter_google.py             # Интеграция с Google Sheets
-│
-├── google_sheets_client/             # Переиспользуемый клиент GSheets
-│   └── google_sheets_client.py       # Сервис для записи/чтения таблиц
-│
-├── creds/
-│   └── service_account.json          # 🔐 Общие креды для GSheets (вне git!)
+/Users/aqa/.hermes/hermes-agent/venv/bin/python services/ZOHO/mcp_server.py
+```
 
+Лог пишется в `Reports/zoho_mcp.log`.
 
-## 🚀 Использование
-1. Генерация Markdown-документа
+### Регистрация в Claude Code
 
-`python main.py generate_plan --start 2025-04-15 --end 2025-04-22`
+```bash
+# Глобально (user scope) — доступен во всех чатах на этом компе:
+claude mcp add zoho --scope user -- \
+  /Users/aqa/.hermes/hermes-agent/venv/bin/python \
+  /полный/путь/до/services/ZOHO/mcp_server.py
 
-2. Обновление статусов из ZOHO (однократно или по необходимости)
+# Только для этого проекта:
+claude mcp add zoho -- \
+  /Users/aqa/.hermes/hermes-agent/venv/bin/python \
+  /Users/aqa/PycharmProjects/pytest_template_SkyPro/services/ZOHO/mcp_server.py
+```
 
-`python main.py sync_statuses`
+### Перенос на другой компьютер
 
-3. Заливка задач или дефектов в Google Sheets
-`python main.py export_tasks --sprint "Sprint_230425"`
-`python main.py export_defects --sprint "Sprint_230425"`
-
-
-## 🔮 Планы на будущее:
-
-- [ ] 🔁 Разделение генерации: план отдельно от отчёта.
-- [ ] 📊 Генерация отчёта по спринту в Google Sheets.
-- [ ] 📅 Поддержка нескольких спринтов в одном запросе.
-- [ ] 📄 Перевод шаблонов на Jinja2.
-- [ ] 🧠 Расширение моделей (Task, Bug, User) через @dataclass или pydantic.
-- [ ] 💬 Генерация уведомлений в Slack/Telegram по шаблону.
-- [ ] 🌐 Web-интерфейс для запуска генерации вручную.
-- [ ] 🧠 Стандартизация логики синхронизации:
-  - sync_statuses_from_zoho() с кэшем,
-  - Поддержка status_cache.json.
-- [ ] 🔐 Хранение токенов через TokenStore:
-  - EnvFileTokenStore
-  - MemoryTokenStore
-  - RedisTokenStore (на перспективу)
-
-## 📎 Контакты
-Разработано для внутренних нужд QA-команды.
-Pull-запросы, доработки и предложения — приветствуются.
-
+1. Скопируй проект (или только `services/ZOHO/`)
+2. Убедись что в venv установлен пакет `mcp`: `pip install mcp`
+3. Убедись что установлены `requests` и `python-dotenv`
+4. Зарегистрируй сервер командой выше (с актуальным путём к python и проекту)
+5. Обнови токены в `config_zoho.env` если они истекли
 
 ---
 
-## ✅ Далее по плану:
+## Связанные модули
 
-1. **Рефакторинг:**
-   - Объединяем ZOHO и генератор в один модуль.
-   - Перевод шаблона на `Jinja2`.
-   - Оптимизация структуры классов (разделим `Collector`, `Renderer`, `Exporter`).
-
-2. **Стратегия** — определим, что вызывать, откуда и как будет проходить полный цикл:
-   - Сбор → парсинг → экспорт в Google → генерация MD/Docs.
-
----
-
-
+- `services/Release_Test_Plan/TestPlanGenerator.py` — генератор QA-планов, использует `ZohoAPI`
+- `test/test_zoho.py` — тесты клиента (исключены из `pytest.ini`, запускать вручную)
+- `portal_data.py` — предзаполненные данные команды и статусов (не требует вызова API)
