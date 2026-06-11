@@ -293,3 +293,6 @@ config/
 .claude/
 services/JMetr/**/backups/
 services/JMetr/**/bower_components/
+*.log
+dist/
+temp_reports/
