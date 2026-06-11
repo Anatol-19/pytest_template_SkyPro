@@ -99,7 +99,10 @@ class PaymentFlow:
 
     def refresh_dashboard(self) -> dict:
         info = self.client.dashboard_info()
-        self.session.member_id = info.get("member_id") or self.session.member_id
+        # При бандле/самосепарате dashboard может вернуть токен-мембера первым —
+        # member_id мастера устанавливается в FlexPost и не перезаписывается.
+        if not self.session.is_bundle:
+            self.session.member_id = info.get("member_id") or self.session.member_id
         self.session.membership_uuid = info.get("membership_uuid", "")
         self.session.member_status = info.get("status", "")
         logger.info("Dashboard: status=%s membership_uuid=%s", self.session.member_status,
@@ -110,6 +113,9 @@ class PaymentFlow:
 
     def _flexpost(self):
         body = payloads.build_flexpost_body(self.session)
+        logger.debug("FlexPost[M] body: pi=%s x_invoice=%s x_is_master=%s x_bundle_keys=%s",
+                     body.get("pi_code"), body.get("x_invoice"), body.get("x_is_master_site"),
+                     [k for k in body if k.startswith("x_bundle")])
         self.client.epoch_sync_json(body)
         self.session.tx_log.append(
             f"FlexPost[M] master member_id={self.session.member_id} tx={self.session.transaction_id} pi={self.session.price.epoch_pi_code}")
@@ -118,6 +124,9 @@ class PaymentFlow:
 
     def _dataplus(self, tx_type):
         form = payloads.build_dataplus_form(self.session, tx_type)
+        logger.debug("DataPlus[%s] pi=%s x_invoice=%s x_is_master=%s x_bundle_keys=%s",
+                     tx_type, form.get("ets_pi_code"), form.get("x_invoice"),
+                     form.get("x_is_master_site"), [k for k in form if k.startswith("x_bundle")])
         self.client.epoch_sync_form(form, label=f"DataPlus[{tx_type}]")
         self.session.last_dataplus_id = self.session.transaction_id
         self.session.tx_log.append(
@@ -292,6 +301,9 @@ class PaymentFlow:
     def _token_flexpost(self):
         """FlexPost-постбэк токена (с зеркалированными x_invoice/x_bundle_*)."""
         body = payloads.build_token_flexpost_body(self.session)
+        logger.debug("FlexPost[token M] pi=%s x_pi=%s x_invoice=%s x_is_master=%s x_bundle_keys=%s",
+                     body.get("pi_code"), body.get("x_pi_code"), body.get("x_invoice"),
+                     body.get("x_is_master_site"), [k for k in body if k.startswith("x_bundle")])
         self.client.epoch_sync_json(body)
         self.session.tx_log.append(
             f"FlexPost[token M] member_id={self.session.token_member_id} tx={self.session.token_transaction_id} pi={self.session.token_pi_code}")

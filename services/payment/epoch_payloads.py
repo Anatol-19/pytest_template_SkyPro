@@ -223,10 +223,10 @@ def build_token_dataplus_form(session: PaymentSession, tx_type: str) -> dict:
     """
     amount = session.token_amount
     ref_ids = "0"
-    if tx_type == "C":  # рефанд токена
+    if tx_type == "C":
         amount = f"-{session.token_amount}"
         ref_ids = session.token_last_dataplus_id or session.token_initial_transaction_id
-    return {
+    form = {
         "ets_transaction_id": session.token_transaction_id,
         "ets_member_idx": session.token_member_id,
         "ets_transaction_date": fakes.transaction_date(),
@@ -258,7 +258,6 @@ def build_token_dataplus_form(session: PaymentSession, tx_type: str) -> dict:
         "ets_prepaid": "",
         "isTest": "true",
         "x_is_master_site": "false",
-        # токен — всегда в контексте самосепарата, зеркалируем x_invoice + x_bundle_* мастера
         "x_invoice": session.invoice_uuid,
         "x_uniq_id": session.invoice_uuid,
         "x_user": session.user_uuid,
