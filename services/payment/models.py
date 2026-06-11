@@ -51,6 +51,10 @@ class PaymentSession:
     last_dataplus_id: str = ""
     session_id: str = ""          # session_id мастер-FlexPost (токен переиспользует тот же)
 
+    # Segpay
+    segpay_eticketid: str = ""    # <prefix>:<segpay_ti_code> из paymentUrl
+    segpay_pplist: str = ""       # = segpay_ti_code
+
     # После Auth + Dashboard
     atoken: str = ""
     rtoken: str = ""

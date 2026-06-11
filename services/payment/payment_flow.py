@@ -8,6 +8,7 @@ import logging
 import os
 
 from services.payment import epoch_payloads as payloads
+from services.payment import segpay_payloads
 from services.payment import fakes
 from services.payment.models import PaymentSession, TariffPrice
 from services.payment.payment_client import PaymentClient, PaymentError
@@ -150,6 +151,84 @@ class PaymentFlow:
         logger.info("Invoice Status: %s purchase_type=%s", data.get("status"),
                     data.get("purchase_type"))
         return data
+
+    # ---------- Segpay (module=segpay, без каскада) ----------
+
+    def create_segpay_url(self):
+        """Create Payment URL c module=segpay; парсим invoice/eticketid/pplist, генерим fake-id."""
+        if not self.session.email:
+            email = fakes.fake_email()
+            self.session.email = email
+            self.session.password = fakes.fake_password(email)
+        result = self.client.create_payment_url(
+            self.session.email, self.session.password, self.session.price.membership_id, module="segpay")
+        self.session.invoice_uuid = result.invoice_uuid
+        self.session.user_uuid = result.user_uuid
+        extras = self.client.parse_segpay_extras(result.payment_url)
+        self.session.segpay_eticketid = extras["eticketid"]
+        self.session.segpay_pplist = extras["pplist"]
+        self.session.member_id = fakes.fake_member_id()
+        self.session.transaction_id = fakes.fake_transaction_id()
+        self.session.initial_transaction_id = self.session.transaction_id
+        self.session.last_dataplus_id = self.session.transaction_id
+        logger.info("Segpay Create URL ok: invoice=%s eticketid=%s", result.invoice_uuid, extras["eticketid"])
+        return result
+
+    def segpay_join(self):
+        """Segpay Initial (stage=Initial, trantype=Sale)."""
+        self.create_segpay_url()
+        self.client.segpay_sync_form(segpay_payloads.build_initial(self.session), "Segpay Initial")
+        self.session.tx_log.append(f"Segpay Initial member_id={self.session.member_id} tx={self.session.transaction_id}")
+        logger.info("Segpay Initial ok: member_id=%s tx=%s", self.session.member_id, self.session.transaction_id)
+        return self.session
+
+    def segpay_rebill(self):
+        """Segpay Recurring (stage=Conversion)."""
+        self.session.transaction_id = fakes.inc_tx(self.session.last_dataplus_id, 3)
+        self.client.segpay_sync_form(segpay_payloads.build_recurring(self.session), "Segpay Recurring")
+        self.session.last_dataplus_id = self.session.transaction_id
+        self.session.tx_log.append(f"Segpay Recurring tx={self.session.transaction_id}")
+        logger.info("Segpay Recurring ok: tx=%s", self.session.transaction_id)
+        return self.session
+
+    def segpay_upgrade(self, target_price_uuid, new_amount=None):
+        """Segpay Upgrade: recurring-upgrade-url/segpay → upgrade-postback.
+
+        Требует залогиненного мембера (membership_uuid) и настроенных в админке upgrade Ti-кодов
+        для целевого тарифа. Без них бэк не сформирует upgrade-ссылку.
+        """
+        self.login()
+        self.refresh_dashboard()
+        if not self.session.membership_uuid:
+            raise PaymentError("Нет membership_uuid — апгрейд невозможен")
+        result = self.client.segpay_upgrade_url(
+            self.session.email, self.session.membership_uuid, target_price_uuid)
+        logger.info("Segpay upgrade-url ok: %s", str(result)[:160])
+        # извлекаем eticketid/pplist целевого тарифа, если ссылка пришла
+        url = result.get("paymentUrl") if isinstance(result, dict) else None
+        if url:
+            extras = self.client.parse_segpay_extras(url)
+            if extras.get("eticketid"):
+                self.session.segpay_eticketid = extras["eticketid"]
+                self.session.segpay_pplist = extras["pplist"]
+        self.session.transaction_id = fakes.inc_tx(self.session.last_dataplus_id, 3)
+        self.client.segpay_sync_form(
+            segpay_payloads.build_upgrade_postback(self.session, new_amount), "Segpay Upgrade")
+        self.session.last_dataplus_id = self.session.transaction_id
+        self.session.tx_log.append(f"Segpay Upgrade -> {target_price_uuid} tx={self.session.transaction_id}")
+        self.refresh_dashboard()
+        return self.session
+
+    def segpay_finalize(self):
+        """Хвост Segpay: Cancel → Refund(Credit)."""
+        self.client.segpay_sync_form(segpay_payloads.build_cancel(self.session), "Segpay Cancel")
+        self.session.tx_log.append("Segpay Cancel")
+        self.session.transaction_id = fakes.inc_tx(self.session.last_dataplus_id, 3)
+        self.client.segpay_sync_form(segpay_payloads.build_refund(self.session), "Segpay Refund")
+        self.session.tx_log.append(f"Segpay Refund tx={self.session.transaction_id}")
+        self.refresh_dashboard()
+        logger.info("Segpay финализация (Cancel→Refund): status=%s", self.session.member_status)
+        return self.session
 
     # ---------- Layer 02: joins ----------
 

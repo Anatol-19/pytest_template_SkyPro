@@ -71,9 +71,10 @@ class PaymentClient(BaseApiClient):
     # ---------- Layer 02: создание оплаты ----------
 
     def create_payment_url(self, email, password, subscr_id, slave_uuids=None,
-                           additional_subscription_id=None):
+                           additional_subscription_id=None, module="epoch"):
         """POST get-recurring-payment-url (новый мембер).
 
+        module — платёжная система: "epoch" | "segpay" (тот же роут, разные шлюзы).
         Идентификация тарифа в трёх местах (как на фронте):
           - subscr_id — UUID мастер/дефолтного тарифа,
           - slavePriceUuids — массив UUID slave-сайтов (бандл),
@@ -84,7 +85,7 @@ class PaymentClient(BaseApiClient):
             "email": email,
             "email_marketing": True,
             "js_hit": "",
-            "module": "epoch",
+            "module": module,
             "password": password,
             "subscr_id": subscr_id,
             "slavePriceUuids": slave_uuids or [],
@@ -93,6 +94,20 @@ class PaymentClient(BaseApiClient):
         if additional_subscription_id is not None:
             payload["additionalSubscriptionId"] = additional_subscription_id
         return self.parse_payment_url(self.post_json("payment_url_new", json=payload))
+
+    @staticmethod
+    def parse_segpay_extras(payment_url):
+        """Из Segpay paymentUrl достать поля для транзакции: eticketid, pplist (=segpay_ti_code),
+        x-auth-link, x-decl-link, invoiceId."""
+        from urllib.parse import unquote
+        qs = parse_qs(urlparse(payment_url).query)
+        return {
+            "eticketid": qs.get("x-eticketid", [""])[0],
+            "pplist": qs.get("pplist", [""])[0],
+            "auth_link": unquote(qs.get("x-auth-link", [""])[0]),
+            "decl_link": unquote(qs.get("x-decl-link", [""])[0]),
+            "invoice_id": qs.get("invoiceId", [""])[0],
+        }
 
     def resolve_bundle(self, price, bundled_hosts):
         """По sale_event.bundledSites и выбранному прайсу собрать состав бандла/самосепарата.
@@ -165,6 +180,34 @@ class PaymentClient(BaseApiClient):
         response = self.request("POST", "epoch_sync", data=data, headers=headers)
         response.raise_for_status()
         return self._epoch_ok(response.json(), label)
+
+    def segpay_upgrade_url(self, email, membership_uuid, upgrade_price_uuid, js_hit=""):
+        """POST recurring-upgrade-url/segpay — тело как у epoch-апгрейда, module=segpay."""
+        payload = {
+            "affiliate": "",
+            "email": email,
+            "email_marketing": False,
+            "js_hit": js_hit,
+            "membership_uuid": membership_uuid,
+            "module": "segpay",
+            "no_redirect": True,
+            "price_membership_id": upgrade_price_uuid,
+            "subscr_id": upgrade_price_uuid,
+            "uuid": "",
+        }
+        return self.post_json("upgrade_url_segpay", json=payload)
+
+    def segpay_sync_form(self, data: dict, label="Segpay"):
+        """POST /api/payment/sync-handler/segpay — form-urlencoded (Initial/Recurring/Cancel/Refund).
+
+        Segpay-хендлер отвечает строкой "OK" (а не {"status":"ok"}, как epoch)."""
+        headers = {"content-type": "application/x-www-form-urlencoded"}
+        response = self.request("POST", "segpay_sync", data=data, headers=headers)
+        response.raise_for_status()
+        text = (response.text or "").strip().strip('"')
+        if text.upper() != "OK":
+            raise PaymentError(f"{label}: Segpay вернул не OK: {response.text[:200]}")
+        return text
 
     @staticmethod
     def _epoch_ok(data, label):
@@ -268,13 +311,18 @@ class PaymentClient(BaseApiClient):
         Никогда не выбирает таб «молча»: если tab не найден — бросает PaymentError
         со списком доступных значений.
         """
-        prices = prices_json.get("prices") or {}
+        prices = prices_json.get("prices")
         if not prices:
-            raise PaymentError(f"В ответе /prices нет категорий: {prices_json}")
-        category = next(iter(prices))
-        by_category = prices.get(category) or []
+            raise PaymentError(f"В ответе /prices нет тарифов: {prices_json}")
+        # prices может быть dict по категориям ({'bundle': [...]}) или плоским списком
+        if isinstance(prices, dict):
+            category = next(iter(prices))
+            by_category = prices.get(category) or []
+        else:
+            category = ""
+            by_category = prices
         if not by_category:
-            raise PaymentError(f"Категория '{category}' пуста (есть: {', '.join(prices.keys())})")
+            raise PaymentError(f"Список тарифов пуст: {prices}")
 
         tab_slug = self._TAB_ALIASES.get(str(tab).lower(), str(tab).lower())
         candidates = [p for p in by_category if (p.get("price_tab") or {}).get("slug") == tab_slug]

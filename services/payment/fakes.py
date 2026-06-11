@@ -39,6 +39,11 @@ def transaction_date() -> str:
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 
+def segpay_date() -> str:
+    """Дата для Segpay: 'MM/DD/YYYY hh:MM:SS AM/PM' (US, AM/PM)."""
+    return datetime.now().strftime("%m/%d/%Y %I:%M:%S %p")
+
+
 def inc_tx(tx_id: str, step: int = 3) -> str:
     """Инкремент числового хвоста transaction_id (для rebill / конверсии).
 
@@ -54,7 +59,7 @@ def inc_tx(tx_id: str, step: int = 3) -> str:
 def fake_email() -> str:
     """Фейковый email нового мембера: YYYY_MM_DD_HH_MM_SSak@mailhog.plus (порт stamp() из Postman)."""
     stamp = datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
-    return f"{stamp}an@mailhog.plus"
+    return f"{stamp}an@mailto.plus"
 
 
 def fake_password(email: str = None) -> str:
