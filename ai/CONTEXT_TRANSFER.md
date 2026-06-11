@@ -81,6 +81,35 @@ bash tools/allure_report.sh
 
 ---
 
+## Двухагентная инфраструктура
+
+В проекте работают **два параллельных агента**:
+
+### Агент 1 — Python (этот чат)
+- Реализует автотесты (`services/payment/`, `test/test_payment.py`)
+- Обсуждает бизнес-логику с пользователем и утверждает флоу
+- **Источник истины** — Python-код
+
+### Агент 2 — Postman
+- Читает Python-реализацию → зеркалит в `/Users/aqa/Documents/postman-work/Payment_final.json`
+- Прогоняет сценарии через Newman
+- Синкает коллекцию в Postman Cloud по явной просьбе пользователя
+- **Точка входа**: `ai/postman/POSTMAN_AGENT_CONTEXT.md`
+- **Тела запросов и переменные**: `ai/postman/PAYMENT_FLOWS.md` (генерируется Python-агентом)
+- **Newman**: `ai/postman/NEWMAN_COMMANDS.md`
+- **Cloud sync**: `ai/postman/CLOUD_SYNC.md`
+
+### Правило взаимодействия
+Python-агент при изменении payloads/флоу **обновляет `ai/postman/PAYMENT_FLOWS.md`**.
+Postman-агент читает этот файл и не лезет в `services/payment/`.
+
+### Зохо MCP
+`services/ZOHO/mcp_server.py` — FastMCP-сервер для Zoho Projects.
+Регистрация: `claude mcp add zoho --scope user -- python /полный/путь/services/ZOHO/mcp_server.py`
+Экспонирует: задачи, баги, пользователи, milestones, task-lists.
+
+---
+
 ## Правила порядка в проекте (регламент)
 
 ### При начале сессии
