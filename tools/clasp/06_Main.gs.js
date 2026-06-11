@@ -14,6 +14,10 @@
 function updatePerfAnalytics() {
   const ss = getPerfSpreadsheet();
   ensurePerfAnalyticsTriggers(ss);
+  
+  // Создаём/обновляем лист Releases если нет
+  ensureReleasesSheet(ss);
+  
   rebuildAnalyticsHelperSheets(ss);
 
   const runRecords = readSheetRecords(ss.getSheetByName(RUNS_SHEET));
@@ -29,7 +33,7 @@ function updatePerfAnalytics() {
 
   DASHBOARD_PROJECTS.forEach(project => {
     const dashboard = getOrCreateSheet(ss, `Dashboard [${project}]`);
-    renderProjectDashboard(dashboard, project, runs, routes, stabilityRows, cruxRows, thresholds);
+    renderProjectDashboard(dashboard, project, runs, routes, stabilityRows, cruxRows, thresholds, ss);
   });
 }
 

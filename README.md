@@ -27,10 +27,19 @@
 - Доступные инструменты (FastMCP):
   - `enqueue_lighthouse(routes, device, iterations=5, environment=None)` → возвращает `job_id`, запускает Lighthouse CLI в фоне.
   - `enqueue_crux(routes, device, environment=None)` → CrUX сбор в фоне.
+  - `enqueue_environment_saturation(environment=None, routes=None, devices=None, iterations=5, tag=None)` → запланированная серия прогонов по всем роутам/устройствам указанного контура.
   - `list_jobs()` → статусы всех заданий (queued/running/done/error).
   - `job_status(job_id)` → статус конкретного задания.
   - Вспомогательные: `run_lighthouse`, `run_crux` (синхронные), `list_environments`, `list_routes`, `get_status`.
-- Параллельность: задания не трогают `base_urls.ini`, каждый `SpeedtestService` получает `environment` напрямую, поэтому несколько фоновых процессов не конфликтуют.
+  - Параллельность: задания не трогают `base_urls.ini`, каждый `SpeedtestService` получает `environment` напрямую, поэтому несколько фоновых процессов не конфликтуют.
+  - По умолчанию `sprint` и rollout-логика для `tag` берутся из `Sprint Control` в dashboard Google Sheets.
+  - `tag` и `sprint` можно передать явно только как override.
+  - CLI: `python services/lighthouse/mcp_server.py --tool run_lighthouse --routes main --device mobile --iterations 10 --environment VRP_PROD`
+  - Пример явного override: `python services/lighthouse/mcp_server.py --tool run_lighthouse --routes main --device mobile --iterations 10 --environment VRP_PROD --tag before_cache`
+
+- Google Apps Script & dashboard:
+  - `npm run gs:push` / `npm run gs:pull` управляют версией `PerfAnalytics.gs` и `Formatter.gs` через clasp.
+  - Обновленный `PerfAnalytics` строит блоковый изолированный Dashboard (overview, trend, worst pages, mobile vs desktop, issues, experiments) и принимает Lab + Field данные.
 
 ### Стек:
 - Pytest

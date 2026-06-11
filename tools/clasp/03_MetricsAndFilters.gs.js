@@ -132,7 +132,29 @@ function aggregateRunMetric_(runs, metricKey) {
   return Math.round(sum / count);
 }
 
-function readSprintMetadata(sheet) {
+function readSprintMetadata(sheet, ss) {
+  // Попытка прочитать из Releases sheet (новый способ)
+  if (ss) {
+    const releases = readReleasesList(ss);
+    const currentSprint = findCurrentSprint(releases);
+    
+    if (currentSprint) {
+      const previousSprint = findPreviousSprint(releases, currentSprint);
+      Logger.log(`[SprintMetadata] Releases: current=${currentSprint.name}, previous=${previousSprint ? previousSprint.name : '—'}`);
+      return {
+        currentSprint: currentSprint.name,
+        previousIncrement: previousSprint ? previousSprint.name : '',
+        rollout: currentSprint.rollout,
+        checkedCount: Object.values(currentSprint.rollout).filter(Boolean).length,
+        hasAnyRollout: currentSprint.status.includes('In Progress'),
+        activeSprint: currentSprint.name,
+        source: 'Releases',
+        releases: releases,  // сохраняем для дальнейшего использования
+      };
+    }
+  }
+  
+  // Fallback на старый способ (E5, E6)
   const rollout = {
     DEV: safeReadCell_(sheet, SPRINT_METADATA_CELLS.devDone) === true,
     TEST: safeReadCell_(sheet, SPRINT_METADATA_CELLS.testDone) === true,
@@ -143,6 +165,8 @@ function readSprintMetadata(sheet) {
   const currentSprint = toText(safeReadCell_(sheet, SPRINT_METADATA_CELLS.currentSprint)).trim();
   const previousIncrement = toText(safeReadCell_(sheet, SPRINT_METADATA_CELLS.nextSprint)).trim();
   const hasAnyRollout = checkedCount > 0;
+  
+  Logger.log(`[SprintMetadata] Fallback E5/E6: current=${currentSprint}, previous=${previousIncrement}`);
   return {
     currentSprint,
     previousIncrement,
@@ -150,6 +174,8 @@ function readSprintMetadata(sheet) {
     checkedCount,
     hasAnyRollout,
     activeSprint: currentSprint || previousIncrement,
+    source: 'E5/E6',
+    releases: [],
   };
 }
 

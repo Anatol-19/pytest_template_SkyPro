@@ -13,12 +13,12 @@
 
 
 
-function renderProjectDashboard(sheet, project, allRuns, allRoutes, allStabilityRows, allCruxRows, thresholds) {
+function renderProjectDashboard(sheet, project, allRuns, allRoutes, allStabilityRows, allCruxRows, thresholds, ss) {
   const projectRuns = allRuns.filter(run => matchesProject(run.project, project));
   const projectRoutes = allRoutes.filter(route => matchesProject(route.project, project));
   const projectStabilityRows = allStabilityRows.filter(item => matchesProject(item.project, project));
   const projectCruxRows = allCruxRows.filter(item => matchesProject(item.project, project));
-  const sprintConfig = readSprintMetadata(sheet);
+  const sprintConfig = readSprintMetadata(sheet, ss);
   const filters = readDashboardFilters(sheet, project, projectRuns, projectRoutes, sprintConfig);
   const mode = normalizeDashboardMode_(filters.mode);
 
@@ -46,7 +46,7 @@ function renderProjectDashboard(sheet, project, allRuns, allRoutes, allStability
   if (mode === 'SPRINT') {
     renderContextOverviewBlock(sheet, LAYOUT.CONTEXT.row, context, thresholds);
     renderAlertsBlock(sheet, LAYOUT.ALERTS.row, context.latest, previous, effectiveRoutes, projectRoutes, effectiveStabilityRows, thresholds, 'БЛОК 2 — АЛЕРТЫ');
-    renderSprintImpactBlock(sheet, LAYOUT.SPRINT_IMPACT.row, project, filters, effectiveRuns, projectRoutes, thresholds, 'БЛОК 3 — SPRINT IMPACT');
+    renderSprintImpactBlock(sheet, LAYOUT.SPRINT_IMPACT.row, project, filters, effectiveRuns, projectRoutes, thresholds, 'БЛОК 3 — SPRINT IMPACT', ss, sprintConfig);
     renderTrendBlock(sheet, LAYOUT.TREND.row, trendRuns, effectiveStabilityRows, effectiveRoutes);
     renderWorstPagesBlock(sheet, LAYOUT.WORST_PAGES.row, effectiveRoutes, thresholds, 'БЛОК 4 — ХУДШИЕ СТРАНИЦЫ');
     renderDeviceSplitBlock(sheet, LAYOUT.DEVICE_SPLIT.row, effectiveRoutes, thresholds, 'БЛОК 5 — DESKTOP VS MOBILE');
@@ -686,82 +686,138 @@ function renderRouteHealthBlock(sheet, row, routes, allProjectRoutes, stabilityM
   return startRow + LAYOUT.ROUTE_HEALTH.height;
 }
 
-function renderSprintImpactBlock(sheet, row, project, filters, allRuns, allRoutes, thresholds, title) {
+function renderSprintImpactBlock(sheet, row, project, filters, allRuns, allRoutes, thresholds, title, ss, sprintConfig) {
   const startRow = row;
   row = renderBlockHeader(sheet, row, title || 'БЛОК — SPRINT IMPACT', 8);
-  const sprintConfig = readSprintMetadata(sheet);
-
-  // after = записи текущего спринта с тегом after
-  // before = (1) записи текущего спринта с тегом before, ИЛИ
-  //          (2) fallback: записи предыдущего инкремента (previousIncrement) — любой тег
-  const currentSprint = (sprintConfig && sprintConfig.currentSprint) || '';
-  const prevIncrement = (sprintConfig && sprintConfig.previousIncrement) || '';
-
-  // after: ищем в текущем спринте записи с тегом after
-  let afterRoutes = allRoutes.filter(r => {
-    if (currentSprint && toText(r.sprint).trim() !== currentSprint) return false;
-    return hasTagToken_(r.tag, 'after');
-  });
-  // Если нет записей текущего спринта — берём последний run_id по каждому env+device
-  if (!afterRoutes.length) {
-    afterRoutes = allRoutes.filter(r => hasTagToken_(r.tag, 'after'));
+  
+  // Используем sprintConfig который уже передан (из renderProjectDashboard)
+  // Если не передан — читаем из sheet
+  if (!sprintConfig) {
+    sprintConfig = readSprintMetadata(sheet, ss);
   }
-
-  // before: сначала ищем записи текущего спринта с тегом before
-  let beforeRoutes = allRoutes.filter(r => {
-    if (currentSprint && toText(r.sprint).trim() !== currentSprint) return false;
-    return hasTagToken_(r.tag, 'before');
-  });
-  // Fallback: если нет before в текущем спринте — берём ВСЕ записи предыдущего инкремента
-  if (!beforeRoutes.length && prevIncrement) {
-    beforeRoutes = allRoutes.filter(r => toText(r.sprint).trim() === prevIncrement);
+  
+  const currentSprint = sprintConfig.currentSprint || '';
+  const releases = sprintConfig.releases || [];
+  
+  // === НОВАЯ ЛОГИКА: используем findBaselineForSprint ===
+  let baseline = null;
+  let afterRoutes = [];
+  
+  // After: только текущий спринт + after
+  if (currentSprint) {
+    afterRoutes = allRoutes.filter(r => 
+        toText(r.sprint).trim() === currentSprint && hasTagToken_(r.tag, 'after')
+    );
   }
-  // Fallback 2: если и предыдущего инкремента нет — берём предпоследний run_id по env+device
-  const usePreviousRunFallback = !beforeRoutes.length;
-  let previousRunMetrics = {};
-  if (usePreviousRunFallback) {
-    previousRunMetrics = buildPreviousRunByEnvDevice_(allRoutes);
+  
+  // Before: многоуровневый fallback через findBaselineForSprint
+  if (currentSprint && releases.length) {
+    const currentSprintObj = findCurrentSprint(releases);
+    if (currentSprintObj) {
+      baseline = findBaselineForSprint(currentSprintObj, releases, allRuns, allRoutes);
+    }
   }
-
-  if (!afterRoutes.length && !beforeRoutes.length && !Object.keys(previousRunMetrics).length) {
-    sheet.getRange(row, 1).setValue('Нет данных для сравнения.').setFontStyle('italic');
+  
+  // Fallback на старую логику если releases нет
+  if (!baseline && currentSprint) {
+    // Уровень 1: before текущего спринта
+    let beforeRoutes = allRoutes.filter(r => 
+        toText(r.sprint).trim() === currentSprint && hasTagToken_(r.tag, 'before')
+    );
+    
+    // Уровень 2: previousIncrement (E6)
+    if (!beforeRoutes.length && sprintConfig.previousIncrement) {
+      beforeRoutes = allRoutes.filter(r => 
+          toText(r.sprint).trim() === sprintConfig.previousIncrement
+      );
+    }
+    
+    // Уровень 3: previous run fallback
+    const usePreviousRunFallback = !beforeRoutes.length;
+    if (usePreviousRunFallback) {
+      baseline = { 
+          source: 'previous_run_fallback', 
+          runs: buildPreviousRunByEnvDevice_(allRoutes),
+          label: 'Предыдущий замер (fallback)'
+      };
+    } else {
+      baseline = { 
+          source: 'before_routes', 
+          runs: beforeRoutes,
+          label: `Before (${sprintConfig.previousIncrement || 'current sprint'})`
+      };
+    }
+  }
+  
+  // Проверка на наличие данных
+  if (!afterRoutes.length && (!baseline || !baseline.runs.length)) {
+    const errorMsg = 'Нет данных для сравнения. Убедитесь что:\n' +
+                     '1. Текущий спринт указан в E5 или Releases\n' +
+                     '2. Есть замеры с тегом "after"\n' +
+                     '3. Есть baseline (before замер или предыдущий спринт)';
+    sheet.getRange(row, 1).setValue(errorMsg).setFontStyle('italic');
     return startRow + LAYOUT.SPRINT_IMPACT.height;
   }
-
+  
+  // Индикатор baseline
+  const baselineLabel = baseline ? baseline.label : '—';
+  const afterLabel = currentSprint ? `After: ${currentSprint}` : 'After (latest)';
+  sheet.getRange(row, 1, 1, 8).setValue(`Baseline: ${baselineLabel} | ${afterLabel}`)
+      .setFontStyle('italic').setFontColor('#607D8B');
+  row++;
+  
   // Группируем по environment + device
   const envDeviceKeys = new Set();
-  beforeRoutes.forEach(r => envDeviceKeys.add(`${normalizeEnvironment(r.environment)}|${r.device.toLowerCase()}`));
+  if (baseline && baseline.runs) {
+    if (baseline.source === 'previous_run_fallback') {
+      Object.keys(baseline.runs).forEach(k => envDeviceKeys.add(k));
+    } else {
+      baseline.runs.forEach(r => envDeviceKeys.add(`${normalizeEnvironment(r.environment)}|${r.device.toLowerCase()}`));
+    }
+  }
   afterRoutes.forEach(r => envDeviceKeys.add(`${normalizeEnvironment(r.environment)}|${r.device.toLowerCase()}`));
-  Object.keys(previousRunMetrics).forEach(k => envDeviceKeys.add(k));
-
+  
   const impactRows = [];
   envDeviceKeys.forEach(key => {
     const parts = key.split('|');
     const env = parts[0];
     const device = parts[1];
-    const aRoutes = afterRoutes.filter(r => normalizeEnvironment(r.environment) === env && r.device.toLowerCase() === device);
+    
+    // After метрики
+    const aRoutes = afterRoutes.filter(r => 
+        normalizeEnvironment(r.environment) === env && r.device.toLowerCase() === device
+    );
     const aMetrics = aggregateRouteMetrics(aRoutes);
-
-    let bMetrics;
-    if (usePreviousRunFallback) {
-      bMetrics = previousRunMetrics[key] || { lcp: null, inp: null, cls: null, ttfb: null };
-    } else {
-      const bRoutes = beforeRoutes.filter(r => normalizeEnvironment(r.environment) === env && r.device.toLowerCase() === device);
-      bMetrics = aggregateRouteMetrics(bRoutes);
+    
+    // Before метрики
+    let bMetrics = { lcp: null, inp: null, cls: null, ttfb: null };
+    if (baseline && baseline.runs) {
+      if (baseline.source === 'previous_run_fallback') {
+        bMetrics = baseline.runs[key] || { lcp: null, inp: null, cls: null, ttfb: null };
+      } else {
+        const bRoutes = baseline.runs.filter(r => 
+            normalizeEnvironment(r.environment) === env && r.device.toLowerCase() === device
+        );
+        bMetrics = aggregateRouteMetrics(bRoutes);
+      }
     }
-
+    
     const lcpDelta = metricDelta(aMetrics.lcp, bMetrics.lcp);
     const inpDelta = metricDelta(aMetrics.inp, bMetrics.inp);
     const clsDelta = metricDelta(aMetrics.cls, bMetrics.cls);
     const ttfbDelta = metricDelta(aMetrics.ttfb, bMetrics.ttfb);
-
-    // Результат по всем Core Web Vitals (LCP, INP, CLS)
+    
+    // Результат
     let result = 'STABLE';
-    const hasRegression = (lcpDelta !== null && lcpDelta > 10) || (inpDelta !== null && inpDelta > 10) || (clsDelta !== null && clsDelta > 10);
-    const hasImprovement = (lcpDelta !== null && lcpDelta < -10) || (inpDelta !== null && inpDelta < -10) || (clsDelta !== null && clsDelta < -10);
+    const hasRegression = (lcpDelta !== null && lcpDelta > 10) || 
+                          (inpDelta !== null && inpDelta > 10) || 
+                          (clsDelta !== null && clsDelta > 10);
+    const hasImprovement = (lcpDelta !== null && lcpDelta < -10) || 
+                           (inpDelta !== null && inpDelta < -10) || 
+                           (clsDelta !== null && clsDelta < -10);
     if (hasRegression) result = 'REGRESSION';
     else if (hasImprovement) result = 'IMPROVED';
-
+    
     impactRows.push({
       env, device,
       lcpBefore: bMetrics.lcp, lcpAfter: aMetrics.lcp, lcpDelta,
@@ -771,13 +827,15 @@ function renderSprintImpactBlock(sheet, row, project, filters, allRuns, allRoute
       result,
     });
   });
-
+  
+  // Таблица
   const headers = ['Контур', 'Устройство', 'LCP before', 'LCP after', 'Δ LCP', 'INP before', 'INP after', 'Δ INP', 'CLS before', 'CLS after', 'Δ CLS', 'Δ TTFB', 'Результат'];
   sheet.getRange(row, 1, 1, headers.length).setValues([headers]).setFontWeight('bold').setBackground('#ECEFF1');
   row++;
-  const dataStartRow = row;
+  
   impactRows.forEach(item => {
-    const resultColor = item.result === 'IMPROVED' ? STATUS_COLORS.GOOD : (item.result === 'REGRESSION' ? STATUS_COLORS.POOR : STATUS_COLORS.NI);
+    const resultColor = item.result === 'IMPROVED' ? STATUS_COLORS.GOOD : 
+                        (item.result === 'REGRESSION' ? STATUS_COLORS.POOR : STATUS_COLORS.NI);
     sheet.getRange(row, 1, 1, headers.length).setValues([[
       item.env,
       item.device,
@@ -802,18 +860,18 @@ function renderSprintImpactBlock(sheet, row, project, filters, allRuns, allRoute
     sheet.getRange(row, headers.length).setBackground(resultColor);
     row++;
   });
-
-  // Sprint Impact Chart — grouped bar: LCP before vs LCP after
+  
+  // График
   if (impactRows.length) {
     const chartData = [['Срез', 'LCP before', 'LCP after']];
     impactRows.forEach(item => {
       chartData.push([`${item.env}-${item.device}`, item.lcpBefore || 0, item.lcpAfter || 0]);
     });
-    const helperRange = sheet.getRange(startRow, HELPER_COLUMN_SECONDARY, chartData.length, 3);
+    const helperRange = sheet.getRange(startRow + 1, HELPER_COLUMN_SECONDARY, chartData.length, 3);
     helperRange.setValues(chartData);
     insertGroupedBarChart(sheet, helperRange, CHART_ZONES.SPRINT.row, CHART_ZONES.SPRINT.col, 'Sprint Impact: LCP before vs after');
   }
-
+  
   return startRow + LAYOUT.SPRINT_IMPACT.height;
 }
 

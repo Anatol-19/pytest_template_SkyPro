@@ -1,5 +1,6 @@
 import configparser
 import os
+import re
 import shutil
 from datetime import datetime
 from pathlib import Path
@@ -137,18 +138,26 @@ def get_full_url(route_name: str) -> str:
     return full_url
 
 
-def get_temp_dir_for_route(route_key: str, device: str, prefix: str = "CLI") -> Path:
+def _normalize_scope_token(value: str) -> str:
+    """Безопасный токен для имени директории/файла."""
+    normalized = re.sub(r"[^A-Za-z0-9_-]+", "_", value.strip())
+    return normalized.strip("_") or "default"
+
+
+def get_temp_dir_for_route(route_key: str, device: str, prefix: str = "CLI", environment: str | None = None) -> Path:
     """
     Возвращает путь к временной директории для конкретного роута и устройства.
     :param route_key: Ключ роута.
     :param device: Тип устройства (desktop или mobile).
     :param prefix: Тип запуска ("CLI", "API", "CrUX").
+    :param environment: Контур запуска. Нужен для изоляции параллельных прогонов.
     :return: Путь к временной директории.
     """
     date = datetime.now().strftime("%d-%m-%y")
-    temp_dir = TEMP_REPORTS_DIR / f"{date}_{prefix}_{route_key}_{device}"
+    scope = _normalize_scope_token(environment or get_current_environment())
+    temp_dir = TEMP_REPORTS_DIR / f"{date}_{scope}_{prefix}_{route_key}_{device}"
     temp_dir.mkdir(parents=True, exist_ok=True)
-    print(f"[DEBUG] Временная директория для роута {route_key} создана: {temp_dir}")
+    print(f"[DEBUG] Временная директория для роута {route_key} ({scope}) создана: {temp_dir}")
     return temp_dir
 
 
@@ -205,21 +214,20 @@ def get_google_creds_path() -> Path:
 def resolve_worksheet_name(environment: str, source: Literal["cli", "api", "crux"]) -> str:
     """
     Возвращает имя рабочего листа Google Sheets по окружению и источнику.
-    
+
     Структура вкладок:
-    - CrUX - общее по всем проектам
-    - VRP [PROD], VRS [PROD] - CLI и API в одном листе, колонка Type
+    - VRP [PROD], VRS [PROD] - CLI, API и CrUX в одном листе, колонка Type
     - VRP [STAGE], VRP [TEST], VRP [DEV] - только CLI
     - VRS [STAGE], VRS [TEST], VRS [DEV] - только CLI
     - Config - управление автоформатированием
     """
-    # CrUX всегда отдельный лист
     if source == "crux":
-        return "CrUX"
-    
+        # CrUX всегда пишем в отдельный общий лист, а не в env-specific raw sheet.
+        # Поддерживаем старое имя переменной из .env и убираем возможные внешние кавычки.
+        crux_sheet = os.getenv("GS_WORKSHEET_CHUX", "CrUX").strip().strip("'\"")
+        return crux_sheet or "CrUX"
+
     # Парсим environment: VRP_PROD -> project=VRP, env=PROD
-    env_upper = environment.upper()
-    
     if "_" in environment:
         parts = environment.split("_", 1)
         project = parts[0].upper()
@@ -227,11 +235,12 @@ def resolve_worksheet_name(environment: str, source: Literal["cli", "api", "crux
     else:
         project = environment.upper()
         env = "PROD"
-    
+
     # Формируем имя листа
     # PROD -> "VRP [PROD]", "VRS [PROD]"
     # STAGE -> "VRP [STAGE]", "VRS [STAGE]"
     # TEST -> "VRP [TEST]", "VRS [TEST]"
     # DEV -> "VRP [DEV]", "VRS [DEV]"
-    
+    # CrUX записывается в тот же лист что и CLI/API (например, VRP [PROD])
+
     return f"{project} [{env}]"

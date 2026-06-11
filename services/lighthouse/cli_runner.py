@@ -12,10 +12,19 @@ import shutil
 import subprocess
 import platform
 import sys
+import builtins
 from datetime import datetime
 
 from services.lighthouse.configs.config_lighthouse import get_temp_dir_for_route
 from services.lighthouse.processor_lighthouse import parse_lighthouse_results
+
+def print(*args, **kwargs):
+    try:
+        builtins.print(*args, **kwargs)
+    except OSError:
+        # В batch/MCP режиме поток логов может оказаться закрыт.
+        # Ошибка логирования не должна обрывать сам запуск Lighthouse.
+        pass
 
 def find_lighthouse_cmd():
     """
@@ -135,7 +144,8 @@ def run_local_lighthouse(
         mode: str = "navigation",
         categories: list = None,
         user_agent: str = None,
-        strategy: str = None):
+        strategy: str = None,
+        environment: str | None = None):
     """
     Запускает Lighthouse CLI для указанного роута с заданными параметрами.
 
@@ -156,13 +166,13 @@ def run_local_lighthouse(
         categories = ["performance", "accessibility", "best-practices", "seo"]
 
     # Создаём временную директорию для отчетов
-    temp_dir = get_temp_dir_for_route(route_key, device, prefix="CLI")
+    temp_dir = get_temp_dir_for_route(route_key, device, prefix="CLI", environment=environment)
 
     results = []
     json_paths = []
 
     date = datetime.now().strftime("%d-%m-%y")
-    environment = os.getenv("ENVIRONMENT", "local")
+    environment_label = (environment or os.getenv("ENVIRONMENT") or "local").replace(" ", "_")
 
     # Загружаем конфигурацию устройства
     config = load_device_config(device)
@@ -183,7 +193,10 @@ def run_local_lighthouse(
 
     try:
         for iteration in range(1, iteration_count + 1):
-            report_file = os.path.join(temp_dir, f"Report_CLI_{date}_{environment}_{route_key}_iter_{iteration}.json")
+            report_file = os.path.join(
+                temp_dir,
+                f"Report_CLI_{date}_{environment_label}_{route_key}_iter_{iteration}.json",
+            )
 
             # Формируем базовую команду
             command = [

@@ -8,6 +8,9 @@ import json
 
 import os
 
+import random
+import builtins
+
 import pytest
 
 import sys
@@ -25,6 +28,8 @@ import requests
 from dotenv import load_dotenv
 
 from google.auth.exceptions import RefreshError
+
+from gspread.exceptions import APIError
 
 from requests import RequestException
 
@@ -51,6 +56,13 @@ from services.lighthouse.configs.config_lighthouse import (
     get_google_creds_path
 
 )
+
+def print(*args, **kwargs):
+    try:
+        builtins.print(*args, **kwargs)
+    except OSError:
+        # Логирование не должно валить прогон, если stderr/stdout уже недоступен.
+        pass
 
 # Загружаем .env из папки lighthouse/configs
 
@@ -93,6 +105,82 @@ class RateLimiter:
 _api_rate_limiter = RateLimiter(max_tokens=20, refill_period=100.0)
 
 
+def _read_dashboard_context(environment: Optional[str]) -> Dict[str, Any]:
+    """
+    Читает контекст спринта и rollout из Google Sheets Dashboard.
+    Возвращает: {active_sprint, rollout, has_any_rollout, environment}
+    """
+    env_name = (environment or get_current_environment()).upper()
+    if "_" not in env_name:
+        return {}
+    
+    project, env = env_name.split("_", 1)
+    spreadsheet_id = os.getenv("GS_SHEET_ID")
+    if not spreadsheet_id:
+        return {}
+    
+    try:
+        creds_path = get_google_creds_path()
+        context = GoogleSheetsClient.read_dashboard_sprint_context(
+            str(creds_path), spreadsheet_id, project
+        )
+        context["project"] = project
+        context["environment"] = env
+        return context
+    except Exception:
+        print(f"[WARNING] Не удалось прочитать dashboard контекст для {environment}")
+        return {}
+
+
+def _resolve_sprint(sprint: Optional[str], environment: Optional[str] = None) -> str:
+    """
+    Возвращает sprint: явный override или из dashboard.
+    """
+    if sprint:
+        return sprint
+    
+    dashboard_context = _read_dashboard_context(environment)
+    return str(dashboard_context.get("active_sprint") or "")
+
+
+def _resolve_tag(tag: Optional[str], environment: Optional[str] = None, source: Literal["cli", "api", "crux"] = "cli") -> str:
+    """
+    Возвращает tag: явный override или из dashboard rollout.
+    
+    Для CLI/API: проверяем rollout для текущего environment.
+    Для CrUX: всегда проверяем PROD rollout (т.к. CrUX доступен только для PROD).
+    
+    Если rollout = TRUE → "after", иначе "before".
+    Если rollout не настроен → "".
+    """
+    if tag:
+        return tag
+
+    dashboard_context = _read_dashboard_context(environment)
+    if not dashboard_context.get("has_any_rollout"):
+        return ""
+
+    rollout = dashboard_context.get("rollout") or {}
+    
+    # Для CrUX всегда используем PROD rollout
+    if source == "crux":
+        return "after" if rollout.get("PROD") else "before"
+    
+    # Для CLI/API используем rollout текущего environment
+    env_name = dashboard_context.get("environment") or ""
+    return "after" if rollout.get(env_name) else "before"
+
+
+def _resolve_launch_context(tag: Optional[str], sprint: Optional[str], environment: Optional[str], source: Literal["cli", "api", "crux"] = "cli") -> Tuple[str, str]:
+    """
+    Возвращает кортеж (tag, sprint) с учётом dashboard контекста.
+    
+    Args:
+        source: "cli", "api" или "crux" — влияет на выбор rollout флага.
+    """
+    return _resolve_tag(tag, environment, source), _resolve_sprint(sprint, environment)
+
+
 def _save_api_result(json_result: dict, route_key: str, device_type: str) -> str:
 
     """
@@ -125,7 +213,7 @@ def _check_site_availability(url: str) -> bool:
 
     try:
 
-        response = requests.get(url, timeout=10)
+        response = requests.get(url, timeout=30)
 
         return response.status_code == 200
 
@@ -197,48 +285,68 @@ class SpeedtestService:
         self.worksheet_name: str
 
     def _initialize_google_client(self, source: Literal["cli", "api", "crux"]) -> GoogleSheetsClient:
-
         """
-
-        Инициализирует клиента Google Sheets.
-
+        Инициализирует клиента Google Sheets с retry при quota exceeded.
         """
-
         credentials_path = get_google_creds_path()
-
         spreadsheet_id = os.getenv("GS_SHEET_ID")
-
         self.worksheet_name = resolve_worksheet_name(self.environment, source)
 
         if not spreadsheet_id:
-
             raise RuntimeError("[ERROR] Не установлены переменные окружения для Google Sheets")
 
-        try:
+        # Retry при инициализации — quota exceeded, network errors
+        max_retries = 5
+        base_delay = 3.0
+        last_error = None
 
-            client = GoogleSheetsClient(
-
-                credentials_path=str(credentials_path),
-
-                spreadsheet_id=spreadsheet_id,
-
-                worksheet_name=self.worksheet_name
-
-            )
-
-            # Автоматически отправляем ранее сохранённые данные при инициализации
+        for attempt in range(max_retries + 1):
             try:
-                client.retry_failed_flushes()
-            except Exception as retry_err:
-                print(f"[WARNING] Retry failed flushes при старте: {retry_err}")
+                print(f"[INFO] Инициализация Google Sheets client (попытка {attempt + 1}/{max_retries + 1})...")
+                client = GoogleSheetsClient(
+                    credentials_path=str(credentials_path),
+                    spreadsheet_id=spreadsheet_id,
+                    worksheet_name=self.worksheet_name
+                )
+                # Автоматически отправляем ранее сохранённые данные при инициализации
+                try:
+                    client.retry_failed_flushes()
+                except Exception as retry_err:
+                    print(f"[WARNING] Retry failed flushes при старте: {retry_err}")
+                print(f"[INFO] Google Sheets client успешно инициализирован.")
+                return client
 
-            return client
+            except RefreshError as e:
+                # Auth error — не ретраим
+                print(f"[ERROR] Ошибка аутентификации: {e}")
+                raise
 
-        except RefreshError as e:
+            except APIError as e:
+                # 429 или 5xx — ретраим
+                status = e.response.status_code if hasattr(e, 'response') and e.response else 500
+                is_retryable = status == 429 or status >= 500
+                last_error = e
 
-            print(f"[ERROR] Ошибка аутентификации: {e}")
+                if not is_retryable or attempt == max_retries:
+                    print(f"[ERROR] Google Sheets API error (не retryable или лимит исчерпан): {e}")
+                    raise
 
-            raise
+                delay = base_delay * (2 ** attempt) + random.uniform(0, 1)
+                print(f"[RETRY] Google Sheets API {status}, попытка {attempt + 1}/{max_retries + 1}, ожидание {delay:.1f}с...")
+                time.sleep(delay)
+
+            except Exception as e:
+                # Другие ошибки — ретраим
+                last_error = e
+                if attempt == max_retries:
+                    print(f"[ERROR] Не удалось инициализировать Google Sheets client после {max_retries} попыток: {e}")
+                    raise
+                delay = base_delay * (2 ** attempt) + random.uniform(0, 1)
+                print(f"[RETRY] Ошибка инициализации, попытка {attempt + 1}/{max_retries + 1}, ожидание {delay:.1f}с...")
+                time.sleep(delay)
+
+        # Должны были выйти по return или raise
+        raise RuntimeError(f"Не удалось инициализировать Google Sheets client: {last_error}")
 
     def _get_routes_from_config(self) -> List[str]:
 
@@ -263,10 +371,12 @@ class SpeedtestService:
                         run_id: Optional[str] = None, tag: str = "", sprint: str = "") -> Dict[str, Any]:
 
         """
-
         Выполняет тесты с использованием локального Lighthouse CLI.
         Возвращает summary: {"succeeded": [...], "failed": [...]}.
-
+        
+        Args:
+            tag: Если пустой — берётся из dashboard (rollout).
+            sprint: Если пустой — берётся из dashboard (active_sprint).
         """
 
         google_client = self._initialize_google_client("cli")
@@ -276,6 +386,10 @@ class SpeedtestService:
         route_keys = route_keys or self._get_routes_from_config()
 
         routes = prepare_routes(route_keys, base_url=base_url)
+
+        # Разрешаем tag и sprint из dashboard если не переданы
+        resolved_tag, resolved_sprint = _resolve_launch_context(tag, sprint, self.environment, source="cli")
+        print(f"[INFO] Launch context: tag={resolved_tag or '—'}, sprint={resolved_sprint or '—'}")
 
         # Генерация run_id если не передан
         if run_id is None:
@@ -293,11 +407,17 @@ class SpeedtestService:
                     failed.append({"route": route_key, "error": "site unavailable"})
                     continue
 
-                json_paths = run_local_lighthouse(route_key, route_url, n_iteration, device_type)
+                json_paths = run_local_lighthouse(
+                    route_key,
+                    route_url,
+                    n_iteration,
+                    device_type,
+                    environment=self.environment,
+                )
                 process_and_save_results(json_paths, route_key, device_type, google_client,
                                          is_local=True, keep_temp_files=keep_temp_files,
                                          environment=self.environment, full_url=route_url,
-                                         iterations=n_iteration, run_id=run_id, tag=tag, sprint=sprint)
+                                         iterations=n_iteration, run_id=run_id, tag=resolved_tag, sprint=resolved_sprint)
 
                 succeeded.append(route_key)
             except Exception as e:
@@ -320,10 +440,12 @@ class SpeedtestService:
                                  run_id: Optional[str] = None, tag: str = "", sprint: str = "") -> Dict[str, Any]:
 
         """
-
         Выполняет запуск Lighthouse через PageSpeed API с агрегацией.
         Возвращает summary: {"succeeded": [...], "failed": [...]}.
-
+        
+        Args:
+            tag: Если пустой — берётся из dashboard (rollout).
+            sprint: Если пустой — берётся из dashboard (active_sprint).
         """
 
         google_client = self._initialize_google_client("api")
@@ -333,6 +455,10 @@ class SpeedtestService:
         route_keys = route_keys or self._get_routes_from_config()
 
         routes = prepare_routes(route_keys, base_url=base_url)
+
+        # Разрешаем tag и sprint из dashboard если не переданы
+        resolved_tag, resolved_sprint = _resolve_launch_context(tag, sprint, self.environment, source="api")
+        print(f"[INFO] Launch context: tag={resolved_tag or '—'}, sprint={resolved_sprint or '—'}")
 
         # Генерация run_id если не передан
         if run_id is None:
@@ -346,7 +472,7 @@ class SpeedtestService:
             try:
                 print(f"[DEBUG]: API запуск для {route_key}: {route_url}")
 
-                temp_dir = get_temp_dir_for_route(route_key, device_type, prefix="API")
+                temp_dir = get_temp_dir_for_route(route_key, device_type, prefix="API", environment=self.environment)
 
                 json_paths = []
 
@@ -380,7 +506,7 @@ class SpeedtestService:
                 process_and_save_results(json_paths, route_key, device_type, google_client,
                                          is_local=False, keep_temp_files=keep_temp_files,
                                          environment=self.environment, full_url=route_url,
-                                         iterations=n_iteration, run_id=run_id, tag=tag, sprint=sprint)
+                                         iterations=n_iteration, run_id=run_id, tag=resolved_tag, sprint=resolved_sprint)
 
                 succeeded.append(route_key)
             except Exception as e:
@@ -400,12 +526,22 @@ class SpeedtestService:
                                  run_id: Optional[str] = None,
                                  tag: str = "",
                                  sprint: str = "") -> Dict[str, Any]:
-        """Выполняет сбор CrUX: page (field) + опционально origin по каждому роуту и девайсу.
-        Возвращает summary: {"succeeded": [...], "failed": [...]}."""
+        """
+        Выполняет сбор CrUX: page (field) + опционально origin по каждому роуту и девайсу.
+        Возвращает summary: {"succeeded": [...], "failed": [...]}.
+        
+        Args:
+            tag: Если пустой — берётся из dashboard (rollout).
+            sprint: Если пустой — берётся из dashboard (active_sprint).
+        """
         google_client = self._initialize_google_client("crux")
         base_url = base_url or get_base_url(self.environment)
         route_keys = route_keys or self._get_routes_from_config()
         routes = prepare_routes(route_keys, base_url=base_url)
+
+        # Разрешаем tag и sprint из dashboard если не переданы
+        resolved_tag, resolved_sprint = _resolve_launch_context(tag, sprint, self.environment, source="crux")
+        print(f"[INFO] Launch context: tag={resolved_tag or '—'}, sprint={resolved_sprint or '—'}")
 
         succeeded = []
         failed = []
@@ -422,7 +558,7 @@ class SpeedtestService:
                     strategy=device_type,
                     mode="field"
                 )
-                temp_dir_url = get_temp_dir_for_route(route_key, device_type, prefix="CrUX")
+                temp_dir_url = get_temp_dir_for_route(route_key, device_type, prefix="CrUX", environment=self.environment)
                 crux_file_url = os.path.join(temp_dir_url, "crux_data.json")
                 with open(crux_file_url, "w", encoding="utf-8") as f:
                     json.dump(crux_data_url, f, ensure_ascii=False, indent=2)
@@ -436,8 +572,8 @@ class SpeedtestService:
                     route_label=route_key,
                     environment=self.environment,
                     run_id=run_id,
-                    tag=tag,
-                    sprint=sprint,
+                    tag=resolved_tag,
+                    sprint=resolved_sprint,
                 )
 
                 if include_origin:
@@ -449,7 +585,12 @@ class SpeedtestService:
                         strategy=device_type,
                         mode="origin"
                     )
-                    temp_dir_origin = get_temp_dir_for_route(route_key + "_origin", device_type, prefix="CrUX")
+                    temp_dir_origin = get_temp_dir_for_route(
+                        route_key + "_origin",
+                        device_type,
+                        prefix="CrUX",
+                        environment=self.environment,
+                    )
                     crux_file_origin = os.path.join(temp_dir_origin, "crux_origin_data.json")
                     with open(crux_file_origin, "w", encoding="utf-8") as f:
                         json.dump(crux_data_origin, f, ensure_ascii=False, indent=2)
@@ -463,8 +604,8 @@ class SpeedtestService:
                         route_label=f"{route_key} (origin)",
                         environment=self.environment,
                         run_id=run_id,
-                        tag=tag,
-                        sprint=sprint,
+                        tag=resolved_tag,
+                        sprint=resolved_sprint,
                     )
 
                 succeeded.append(route_key)

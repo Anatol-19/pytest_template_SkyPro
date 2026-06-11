@@ -275,3 +275,21 @@ celerybeat.pid
 
 ### SageMath ###
 *.sage.py
+
+### Project-specific ###
+node_modules/
+.venv312/
+.qwen/
+.ai/
+SOUL.md
+mcp_http.out
+server.err
+tmp_*.py
+.tmp_*
+$null
+tools/clasp/.clasp.json
+config/
+.mcp.json
+.claude/
+services/JMetr/**/backups/
+services/JMetr/**/bower_components/
