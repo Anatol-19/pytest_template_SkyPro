@@ -1,0 +1,16 @@
+{
+  "name": "pytest-template-skypro",
+  "version": "1.0.0",
+  "description": "Performance testing with Lighthouse",
+  "scripts": {
+    "inp-test": "node scripts/lighthouse_inp.js",
+    "gs:push": "cd tools/clasp && clasp push",
+    "gs:pull": "cd tools/clasp && clasp pull",
+    "sheet:snapshot": "python scripts/pull_sheet_snapshot.py"
+  },
+  "dependencies": {
+    "lighthouse": "^12.0.0",
+    "puppeteer": "^22.0.0"
+  },
+  "devDependencies": {}
+}

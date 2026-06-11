@@ -1,0 +1,26 @@
+{
+  "timeZone": "Europe/Kaliningrad",
+  "dependencies": {},
+  "exceptionLogging": "STACKDRIVER",
+  "runtimeVersion": "V8",
+  "sheets": {
+    "macros": [
+      {
+        "menuName": "updatePerfAnalytics",
+        "functionName": "updatePerfAnalytics"
+      },
+      {
+        "menuName": "applyConditionalFormatting",
+        "functionName": "applyConditionalFormatting"
+      },
+      {
+        "menuName": "runDailyApiMonitoring",
+        "functionName": "runDailyApiMonitoring"
+      },
+      {
+        "menuName": "setupDailyApiMonitoringTrigger",
+        "functionName": "setupDailyApiMonitoringTrigger"
+      }
+    ]
+  }
+}
