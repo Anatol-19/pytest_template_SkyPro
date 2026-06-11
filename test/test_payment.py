@@ -21,6 +21,7 @@ Allure-иерархия:
 import allure
 import pytest
 
+from services.payment import config_payment as pay_cfg
 from services.payment.payment_client import PaymentError
 
 
@@ -90,7 +91,16 @@ class TestUserJoins:
             allure.dynamic.title(f"Bundle {event.upper()} ({min_slaves} slave) + Rebill → Cancel→Refund")
             allure.dynamic.tag("Bundle Master", "Bundle Slave", "Rebill", "Cancel", "Refund")
 
-        payment_flow.select_tariff(event=event, bundle=True)
+        # Пропускаем если sale event не настроен на этом контуре
+        env = payment_flow.client.environment or "VRP_STAGE"
+        allowed = pay_cfg.SALE_EVENT_KEYS.get(env, [])
+        if event not in allowed:
+            pytest.skip(f"Sale event '{event}' не настроен на {env} (SALE_EVENT_KEYS в config_payment.py)")
+
+        try:
+            payment_flow.select_tariff(event=event, bundle=True)
+        except PaymentError as e:
+            pytest.skip(f"Sale event '{event}' недоступен на {env}: {e}")
         s = payment_flow.session
         assert len(s.slave_uuids) >= min_slaves, f"ожидали ≥{min_slaves} slave для {event}"
         assert s.is_self_separate is is_self

@@ -1,111 +1,117 @@
-# Передача контекста для ИИ-агента
+# Точка входа для ИИ-агента (Claude Code)
 
-> Этот документ — точка входа для нового ИИ-агента (или новой сессии Claude Code).  
-> Прочитай его первым, затем при необходимости открывай файлы из списка ниже.
+> Читай этот файл первым при старте новой сессии в этом проекте.
+> Здесь — суть проекта, ссылки на детали и правила порядка.
 
 ---
 
 ## Что это за проект
 
-QA-фреймворк автоматизации для платформ **VRPorn** и **VRSmash**.  
-Язык: Python 3.12. Фреймворк тестирования: Pytest.  
-Все комментарии, docstrings и сообщения в логах — на **русском языке**.
+QA-фреймворк автоматизации для платформ **VRPorn** и **VRSmash**.
+Язык: Python 3.12. Фреймворк: Pytest + Allure. Все комментарии, логи, docstrings — **по-русски**.
+
+Три независимых направления:
+
+| Направление | Тест | Инструменты |
+|---|---|---|
+| Функциональные / GUI | `test/simple_test.py` | Selenium + POM |
+| Производительность | `test/speed_test.py` | Lighthouse CLI / PageSpeed API |
+| Content Assets (API) | `test/test_content_assets.py` | Requests |
+| Payment (API) | `test/test_payment.py` | Requests + Epoch + Segpay |
 
 ---
 
-## Минимальный контекст для старта
+## Как запускать
 
-### Чтобы запустить тесты:
 ```bash
 # Установить зависимости
 pip install -r requirements.txt
 
-# GUI-тесты
-pytest -m functional
+# Payment-тесты (основная активная работа)
+.venv/bin/python -m pytest -m payment --environment=VRP_STAGE -v
 
-# Перф-тесты
-pytest -m performance
-
-# Content Assets
-pytest test/test_content_assets.py --environment=VRP_PROD --assets-csv="/path/to/file.csv"
+# Все команды payment — ai/PAYMENT_RUN_COMMANDS.md
+# Allure
+bash tools/allure_report.sh
 ```
-
-### Чтобы добавить новый тест:
-1. **GUI**: добавь метод в `POM/` (Page Object), используй `helper/GUIHelper.py` для взаимодействия с элементами, создай тест в `test/simple_test.py` с маркером `@pytest.mark.functional`.
-2. **API**: используй `REST/base_client.py` → `BaseApiClient`, добавь маршрут в `URLs/routes.ini`.
-3. **Перф**: добавь маршрут в `URLs/routes.ini`, вызови `SpeedtestService` из `services/lighthouse/pagespeed_service.py`.
-
-### Чтобы добавить новый маршрут:
-Открой `URLs/routes.ini`, добавь строку в секцию `[routes]`:
-```ini
-my_page = /path/to/page/
-```
-
-### Чтобы переключить окружение:
-- Для `BaseApiClient` / content tests: `--environment=VRP_STAGE` или `BaseApiClient(environment="VRP_STAGE")`
-- Для Lighthouse: `SpeedtestService(environment="VRP_STAGE")`
-- **Не редактируй** `[environments] current` в `base_urls.ini` — это сломает параллельные запуски.
 
 ---
 
 ## Критически важные файлы
 
-| Файл | Зачем читать |
+| Файл | Зачем |
 |---|---|
-| `CLAUDE.md` | Полная инструкция для Claude Code |
-| `ai/PROJECT_REPORT.md` | Полный отчёт по архитектуре проекта |
-| `URLs/base_urls.ini` | Все окружения и их URL |
-| `URLs/routes.ini` | Все именованные маршруты |
+| `CLAUDE.md` | Главная инструкция для Claude Code |
+| `URLs/base_urls.ini` | Все окружения. НЕ менять `current` вручную |
+| `URLs/routes.ini` | Именованные маршруты |
 | `REST/base_client.py` | Ядро HTTP-клиента |
-| `test/conftest.py` | Все фикстуры и CLI-флаги |
-| `services/lighthouse/pagespeed_service.py` | Оркестратор Lighthouse |
-| `services/content_assets/verifier.py` | Логика верификации CDN |
+| `services/payment/config_payment.py` | Константы + **SALE_EVENT_KEYS** (DropCard конфиг) |
+| `services/payment/payment_flow.py` | Оркестратор сценариев |
+| `services/payment/epoch_payloads.py` | Тела Epoch-постбэков |
+| `services/payment/segpay_payloads.py` | Тела Segpay-постбэков |
+| `test/conftest.py` | Фикстуры + CLI-флаги |
 
 ---
 
-## Переменные окружения (нужны для запуска)
+## Документы ai/
 
-Создай `.env` в корне проекта:
-```env
-VRP_MEMBER_EMAIL=...
-VRP_MEMBER_PASSWORD=...
-```
-
-Для Lighthouse создай `services/lighthouse/configs/config_lighthouse.env`:
-```env
-PAGESPEED_API_KEY=...
-SPREADSHEET_ID=...
-# и другие — см. config_lighthouse.py
-```
-
----
-
-## Что сейчас не работает / отключено
-
-- `test/test_zoho.py` — исключён в `pytest.ini`, ZOHO-сервис в разработке
-- Opera и Edge WebDriver — закомментированы в `helper/StartSession.py`
-- `services/JMetr/` — JMeter план есть, но не интегрирован с Pytest
-
----
-
-## Типичные задачи и с чего начать
-
-| Задача | Стартовый файл |
+| Файл | Содержание |
 |---|---|
-| Добавить GUI-тест | `POM/AuthPage.py` → `test/simple_test.py` |
-| Добавить API-проверку | `REST/base_client.py` → новый `_client.py` в `services/` |
-| Добавить перф-маршрут | `URLs/routes.ini` → `test/speed_test.py` |
-| Отладить content assets | `services/content_assets/verifier.py` |
-| Добавить инструмент в MCP | `services/lighthouse/mcp_server.py` |
-| Обновить дашборд Google Sheets | `services/lighthouse/Google Sheet/*.gs` + `tools/clasp/` |
+| `CONTEXT_TRANSFER.md` | **Этот файл — точка входа** |
+| `VRP_BUSINESS_LOGIC.md` | Авторитетная бизнес-логика (из Docmost) |
+| `VRP_PAYMENT_TESTING.md` | Детали платёжного тестирования |
+| `PAYMENT_CASES_MATRIX.md` | Утверждённые 11 кейсов |
+| `PAYMENT_EXPANSION_PLAN.md` | Фазы 1-4: Segpay/Centrobill/Epoch-extras/Sale Events |
+| `PAYMENT_RUN_COMMANDS.md` | Команды запуска, Allure |
+| `POSTMAN_ANALYSIS.md` | Анализ Postman-коллекции |
+| `PROJECT_REPORT.md` | Архитектурный снимок проекта |
 
 ---
 
-## Соглашения кодовой базы
+## Ключевые архитектурные решения (не менять без обсуждения)
 
-- Все сообщения, логи, комментарии — **по-русски**
-- `BaseApiClient` читает маршруты из `routes.ini`, не из `routes.py` (legacy)
-- ConfigParser возвращает ключи в нижнем регистре: `base_url`, не `BASE_URL`
-- Метрики Lighthouse: `P`, `LCP`, `FCP`, `TBT`, `CLS`, `SI`, `TTI`, `TTFB`, `INP`
-- Типы устройств: строго `"desktop"` или `"mobile"`
-- Отчёты: `Reports/reports_lighthouse/`, временные файлы: `Reports/reports_lighthouse/temp_lighthouse/`
+- `BaseApiClient` читает роуты из `routes.ini`, не хардкодит URL
+- ConfigParser → все ключи нижним регистром: `base_url`, не `BASE_URL`
+- **Не писать** в `base_urls.ini[environments] current` — только `--environment=` флаг
+- Epoch: FlexPost[M] JSON + DataPlus form-urlencoded через `/api/payment/sync-handler/epoch`
+- Segpay: один form-постбэк на событие через `/api/payment/sync-handler/segpay`; ответ — строка `"OK"`
+- **CrossSale ≠ Bundle**: CrossSale — DataPlus без инвойса (инициирует платёжка, мы не создавали invoice); Bundle — Dynamic Price, мы slave, нет инвойса
+- Все бандл/самосепарат постбэки (FlexPost И DataPlus) ОБЯЗАНЫ содержать `x_invoice` + `x_bundle_*`, иначе бэкенд создаёт CrossSale-мембершип
+- DropCard sale event ключи по контурам — `config_payment.SALE_EVENT_KEYS`; тест пропускается если ключ не настроен
+
+---
+
+## Правила порядка в проекте (регламент)
+
+### При начале сессии
+1. Прочитай этот файл + `CLAUDE.md`
+2. Если задача по payment — открой `VRP_BUSINESS_LOGIC.md` и `PAYMENT_CASES_MATRIX.md`
+3. Проверь `git status` — не оставляй незакоммиченных изменений по завершении
+
+### Что коммитить
+- Каждая логическая единица — отдельный коммит с описательным сообщением
+- `.idea/`, `*.pyc`, `Reports/`, `.env` — не коммитить (см. `.gitignore`)
+- `tools/verify_arp_playa_assets.py` — не трогать до явного решения по нему
+
+### Документы ai/
+- `ai/` — для людей и агентов: бизнес-логика, планы, матрицы кейсов
+- Не хранить в `ai/` per-contour runtime-конфиги → они в `config_payment.py`
+- Удалять устаревшие доки сразу (не накапливать `*_v2.md`, `*_old.md`)
+- Перед удалением дока — убедись что его содержание отражено в актуальном файле
+
+### Для агента на другом компьютере
+При первом запуске после `git pull`:
+1. Прочитай этот файл
+2. Проверь `git log --oneline -5` — убедись что на актуальном коммите
+3. Если есть незакоммиченные изменения — разберись что это (`git diff`) до работы
+4. Запусти `pytest --collect-only -m payment` — проверь что всё импортируется
+5. Следуй `CLAUDE.md` и этому файлу
+
+---
+
+## Текущий статус (обновлять при смене фазы)
+
+**Активная работа:** Payment-тесты, Фаза 1 (Epoch + Segpay) — в процессе  
+**Следующая фаза:** Epoch extras (Chargeback/CrossSale/Slave-side) → Centrobill → Sale Events  
+**Известные ограничения:** Segpay upgrade синтетически не воспроизводится (живой API)  
+**На VRP_PROD:** настроен только DropCard SS; остальные ключи только на тестовых контурах

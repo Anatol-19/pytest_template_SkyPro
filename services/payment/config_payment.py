@@ -41,6 +41,16 @@ INVOICE_PRODUCT_MAP = {
 DEFAULT_CONTOURS = ["VRP_DEV", "VRP_TEST", "VRP_STAGE"]
 ALL_CONTOURS = ["VRP_DEV", "VRP_TEST", "VRP_STAGE", "VRP_PROD"]
 
+# Sale Event ключи, настроенные в админке по контурам.
+# Обновлять вручную после изменений в админке.
+# Тест пропускается (pytest.skip) если нужного ключа нет на контуре.
+SALE_EVENT_KEYS: dict[str, list[str]] = {
+    "VRP_DEV":   ["mono", "bundle", "super", "self", "ss", "sos"],
+    "VRP_TEST":  ["mono", "bundle", "super", "self", "ss", "sos"],
+    "VRP_STAGE": ["mono", "bundle", "super", "self", "ss", "sos"],
+    "VRP_PROD":  ["ss"],  # DropCard SS подтверждён на проде 2026-06-11
+}
+
 # Хосты «своего» сайта (для self-separated: bundledSites отдаёт голый vrporn.com).
 # Если bundled-хост входит сюда — это самосепарат (токен), а не slave-сайт.
 SELF_HOSTS = {"vrporn.com", "sg.vrporn.com", "d.vrporn.com", "t.vrporn.com"}

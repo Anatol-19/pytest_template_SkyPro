@@ -205,6 +205,13 @@ def build_dataplus_form(session: PaymentSession, tx_type: str) -> dict:
         "isTest": "true",
         "x_is_master_site": "true" if session.is_bundle else "false",
     }
+    # Бандл/самосепарат: x_invoice + x_bundle_* обязательны во всех постбэках.
+    # Без x_invoice бэкенд не может привязать DataPlus к Dynamic Price инвойсу → создаёт CrossSale.
+    if session.is_bundle:
+        form["x_invoice"] = session.invoice_uuid
+        form["x_uniq_id"] = session.invoice_uuid
+        form["x_user"] = session.user_uuid
+        form.update(_bundle_x_params(session))
     return form
 
 
@@ -251,7 +258,13 @@ def build_token_dataplus_form(session: PaymentSession, tx_type: str) -> dict:
         "ets_prepaid": "",
         "isTest": "true",
         "x_is_master_site": "false",
+        # токен — всегда в контексте самосепарата, зеркалируем x_invoice + x_bundle_* мастера
+        "x_invoice": session.invoice_uuid,
+        "x_uniq_id": session.invoice_uuid,
+        "x_user": session.user_uuid,
     }
+    form.update(_bundle_x_params(session))
+    return form
 
 
 def build_token_cancel_form(session: PaymentSession, reason="TEST Reason") -> dict:
