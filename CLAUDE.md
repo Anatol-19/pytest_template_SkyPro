@@ -24,7 +24,7 @@ pytest test/test_content_assets.py \
 
 # Payment flow tests (per contour)
 pytest -m payment --environment=VRP_STAGE -v
-python run_payment_contours.py --contours VRP_DEV,VRP_TEST,VRP_STAGE
+python test/run_payment_contours.py --contours VRP_DEV,VRP_TEST,VRP_STAGE
 
 # Allure report (on by default → Reports/allure; disable with --no-allure)
 bash tools/allure_report.sh          # generate with history/trend + open
@@ -73,7 +73,7 @@ API-level payment flow tests for VRPorn (Join / Upgrade / Cancel / Refund / Rebi
 
 `services/payment/`: `PaymentClient(BaseApiClient)` (HTTP + response parsers), `epoch_payloads.py` (FlexPost JSON / DataPlus+Cancel+FlexGrade form bodies), `payment_flow.py` (`PaymentFlow` orchestrator accumulating `PaymentSession`), `fakes.py` (synthetic member/tx/session ids, `inc_tx`), `config_payment.py` (Epoch sandbox constants).
 
-Contour-agnostic: select via `--environment=VRP_DEV|VRP_TEST|VRP_STAGE|VRP_PROD` (default `VRP_STAGE`). `self_host` resolved dynamically from `base_url` (no hardcoded host). Multi-contour runner: `run_payment_contours.py`. Layer 03 + re-join need `VRP_PAY_EMAIL`/`VRP_PAY_PASSWORD` in `.env`. **Run only on non-PROD by default.** Marker `@pytest.mark.payment`. Reference: `ai/POSTMAN_ANALYSIS.md`, `ai/VRP_PAYMENT_TESTING.md`.
+Contour-agnostic: select via `--environment=VRP_DEV|VRP_TEST|VRP_STAGE|VRP_PROD` (default `VRP_STAGE`). `self_host` resolved dynamically from `base_url` (no hardcoded host). Multi-contour runner: `test/run_payment_contours.py`. Layer 03 + re-join need `VRP_PAY_EMAIL`/`VRP_PAY_PASSWORD` in `.env`. **Run only on non-PROD by default.** Marker `@pytest.mark.payment`. Reference: `ai/POSTMAN_ANALYSIS.md`, `ai/VRP_PAYMENT_TESTING.md`.
 
 > Payment auth endpoint is `/api/wp/secure/auth/login` (route `auth_payment`) — distinct from content tests' `/proxy-user/api/wp/auth/login` (route `auth_login`).
 
