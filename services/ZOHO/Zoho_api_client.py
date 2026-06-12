@@ -217,7 +217,7 @@ class ZohoAPI:
         Получает список порталов.
         :return dict | None: Список порталов или None в случае ошибки.
         """
-        url = f"{self.base_url}/portals/"
+        url = f"{self.base_url}/"
         return self.send_request(url)
 
 
