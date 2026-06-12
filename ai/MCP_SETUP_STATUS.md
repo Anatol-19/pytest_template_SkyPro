@@ -104,6 +104,21 @@ zoho: ... - ✓ Connected
 
 ---
 
+## Скиллы / инструкции по MCP
+
+Плагин-система Claude Code **не поддерживает** локальные постоянные скиллы:
+- `installed_plugins.json` перезаписывается Claude Code при рестарте
+- `--plugin-dir` работает только для текущей сессии
+- `claude plugin marketplace add` принимает только URL/GitHub, не локальные пути
+
+**Решение:** инструкции по всем 4 MCP написаны в `~/.claude/CLAUDE.md`.  
+Этот файл всегда загружается в контекст любого чата на этом компе.  
+Триггеры описаны там — `/zoho`, `/qase`, `/docmost`, `/lighthouse`.
+
+При переезде на новую машину — скопировать `~/.claude/CLAUDE.md`.
+
+---
+
 ## Чеклист при переезде на новую машину
 
 - [ ] Установить Python с пакетом `mcp` (`pip install mcp`)
@@ -114,3 +129,4 @@ zoho: ... - ✓ Connected
 - [ ] Зарегистрировать Zoho: `claude mcp add zoho --scope user ...`
 - [ ] Проверить: `claude mcp list` — оба Connected
 - [ ] Docmost и Qase — зарегистрировать отдельно
+- [ ] Скопировать `~/.claude/CLAUDE.md` — содержит инструкции по всем MCP
