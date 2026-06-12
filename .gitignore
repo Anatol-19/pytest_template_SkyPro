@@ -1,6 +1,7 @@
 creds/
 **/creds/
 config_lighthouse.env
+*.local.md
 
 ### Test reports ###
 Reports/
