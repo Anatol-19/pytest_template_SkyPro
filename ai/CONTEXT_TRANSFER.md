@@ -58,6 +58,8 @@ bash tools/allure_report.sh
 | Файл | Содержание |
 |---|---|
 | `CONTEXT_TRANSFER.md` | **Этот файл — точка входа** |
+| `GIT_FLOW.md` | Регламент веток и git-workflow (читать при начале нового инкремента) |
+| `MCP_SETUP_STATUS.md` | Состояние MCP-серверов на обеих машинах + команды регистрации |
 | `VRP_BUSINESS_LOGIC.md` | Авторитетная бизнес-логика (из Docmost) |
 | `VRP_PAYMENT_TESTING.md` | Детали платёжного тестирования |
 | `PAYMENT_CASES_MATRIX.md` | Утверждённые 11 кейсов |
@@ -103,10 +105,27 @@ bash tools/allure_report.sh
 Python-агент при изменении payloads/флоу **обновляет `ai/postman/PAYMENT_FLOWS.md`**.
 Postman-агент читает этот файл и не лезет в `services/payment/`.
 
-### Зохо MCP
-`services/ZOHO/mcp_server.py` — FastMCP-сервер для Zoho Projects.
-Регистрация: `claude mcp add zoho --scope user -- python /полный/путь/services/ZOHO/mcp_server.py`
-Экспонирует: задачи, баги, пользователи, milestones, task-lists.
+### MCP-серверы проекта
+Оба зарегистрированы в **user scope** — доступны глобально в Claude Code и Claude.ai.
+Детали и команды регистрации: `ai/MCP_SETUP_STATUS.md`.
+
+| Сервер | Файл | Экспонирует |
+|---|---|---|
+| `lighthouse` | `services/lighthouse/mcp_server.py` | запуск Lighthouse CLI/API, CrUX, статус |
+| `zoho` | `services/ZOHO/mcp_server.py` | задачи, баги, пользователи, milestones |
+
+---
+
+## Git Flow (договорено 2026-06-12)
+
+**Кратко**: работа в ветках, мерж в `main` только по завершении инкремента.
+Детали: `ai/GIT_FLOW.md`.
+
+Формат веток: `feat/`, `fix/`, `chore/`, `epic/` + kebab-case описание.
+```bash
+git checkout -b feat/payment-centrobill   # начало работы
+git merge --no-ff feat/payment-centrobill # завершение (из main)
+```
 
 ---
 
